@@ -39,6 +39,12 @@ public partial class Plugin : BaseUnityPlugin
     private static ConfigEntry<float> configLineSpacing;
     private static ConfigEntry<float> configSizeDeltaX;
     private static ConfigEntry<float> configForceUpdateTime;
+    private static ConfigEntry<bool> configEnableTestMode;
+
+    // 测试模式变量
+    private static List<Item> allItemPrefabs = new List<Item>();
+    private static int currentTestItemIndex = 0;
+    private static bool testModeInitialized = false;
 
     private void Awake()
     {
@@ -51,6 +57,7 @@ public partial class Plugin : BaseUnityPlugin
         configLineSpacing = ((BaseUnityPlugin)this).Config.Bind<float>("ItemInfoDisplay", "Line Spacing", -35f, "Customize the Line Spacing for item description text.");
         configSizeDeltaX = ((BaseUnityPlugin)this).Config.Bind<float>("ItemInfoDisplay", "Size Delta X", 550f, "Customize the horizontal length of the container for the mod. Increasing moves text left, decreasing moves text right.");
         configForceUpdateTime = ((BaseUnityPlugin)this).Config.Bind<float>("ItemInfoDisplay", "Force Update Time", 1f, "Customize the time in seconds until the mod forces an update for the item.");
+        configEnableTestMode = ((BaseUnityPlugin)this).Config.Bind<bool>("ItemInfoDisplay", "Enable Test Mode", false, "Enable test mode to cycle through all items with F9/F10 keys.");
         Harmony.CreateAndPatchAll(typeof(ItemInfoDisplayUpdatePatch));
         Harmony.CreateAndPatchAll(typeof(ItemInfoDisplayEquipPatch));
         Harmony.CreateAndPatchAll(typeof(ItemInfoDisplayFinishCookingPatch));
@@ -72,6 +79,12 @@ public partial class Plugin : BaseUnityPlugin
                 }
                 else
                 {
+                    // 测试模式：按键循环物品
+                    if (configEnableTestMode.Value)
+                    {
+                        HandleTestModeInput();
+                    }
+
                     if (Character.observedCharacter.data.currentItem != null)
                     {
                         if (hasChanged)
@@ -170,7 +183,7 @@ public partial class Plugin : BaseUnityPlugin
     {
         Item item = Character.observedCharacter.data.currentItem; // not sure why this broke after THE MESA update, made no changes (just rebuilt)
         GameObject itemGameObj = item.gameObject;
-        Component[] itemComponents = itemGameObj.GetComponents(typeof(Component));
+        Component[] itemComponents = itemGameObj.GetComponents(typeof(Component)).GroupBy(c => c.GetType()).Select(g => g.First()).ToArray();
         bool isConsumable = false;
         string prefixStatus = "";
         string suffixWeight = "";
@@ -274,19 +287,20 @@ public partial class Plugin : BaseUnityPlugin
             else if (itemComponents[i].GetType() == typeof(Action_ClearAllStatus))
             {
                 Action_ClearAllStatus effect = (Action_ClearAllStatus)itemComponents[i];
-                itemInfoDisplayTextMesh.text += effectColors["ItemInfoDisplayPositive"] + "CLEAR ALL STATUS</color>";
+                string clearAllStatusText = GetText("ClearAllStatus_Base", effectColors["ItemInfoDisplayPositive"]);
                 if (effect.excludeCurse)
                 {
-                    itemInfoDisplayTextMesh.text += " EXCEPT " + effectColors["Curse"] + "CURSE</color>";
+                    clearAllStatusText += GetText("ClearAllStatus_ExceptCurse", effectColors["Curse"]);
                 }
                 if (effect.otherExclusions.Count > 0)
                 {
                     foreach (CharacterAfflictions.STATUSTYPE exclusion in effect.otherExclusions)
                     {
-                        itemInfoDisplayTextMesh.text += ", " + effectColors[exclusion.ToString()] + exclusion.ToString().ToUpper() + "</color>";
+                        clearAllStatusText += ", " + effectColors[exclusion.ToString()] + GetText($"Effect_{exclusion.ToString().ToUpper()}").ToUpper() + "</color>";
                     }
                 }
-                itemInfoDisplayTextMesh.text = itemInfoDisplayTextMesh.text.Replace(", <#E13542>CRAB</color>", "") + "\n";
+                clearAllStatusText = clearAllStatusText.Replace(", <#E13542>" + GetText("Effect_CRAB").ToUpper() + "</color>", "") + "\n";
+                itemInfoDisplayTextMesh.text += clearAllStatusText;
             }
             else if (itemComponents[i].GetType() == typeof(Action_ConsumeAndSpawn))
             {
@@ -421,7 +435,7 @@ public partial class Plugin : BaseUnityPlugin
                 //using force update here for remaining length since Rope has no character distinction for Detach_Rpc() hook, maybe unless OK with any player triggering this
                 if (configForceUpdateTime.Value <= 1f)
                 {
-                    suffixUses += "   " + (effect.RopeFuel / 4f).ToString("F2").Replace(".00", "") + "m LEFT";
+                    suffixUses += GetText("RopeSpool_Left", (effect.RopeFuel / 4f).ToString("F2").Replace(".00", ""));
                 }
             }
             else if (itemComponents[i].GetType() == typeof(RopeShooter))
@@ -474,7 +488,7 @@ public partial class Plugin : BaseUnityPlugin
                     AOE[] effect2AOEs = effect2.GetComponents<AOE>();
                     TimeEvent effect2TimeEvent = effect2.GetComponent<TimeEvent>();
                     RemoveAfterSeconds effect2RemoveAfterSeconds = effect2.GetComponent<RemoveAfterSeconds>();
-                    itemInfoDisplayTextMesh.text += effectColors["Hunger"] + "THROW</color> TO RELEASE GAS THAT WILL:\n";
+                    itemInfoDisplayTextMesh.text += GetText("HealingPuffShroom", effectColors["Hunger"]);
                     itemInfoDisplayTextMesh.text += ProcessEffect((Mathf.Round(effect1AOE.statusAmount * 0.9f * 40f) / 40f), effect1AOE.statusType.ToString()); // incorrect? calculates strangely so i somewhat manually adjusted the values
                     itemInfoDisplayTextMesh.text += ProcessEffectOverTime((Mathf.Round(effect2AOE.statusAmount * (1f / effect2TimeEvent.rate) * 40f) / 40f), 1f, effect2RemoveAfterSeconds.seconds, effect2AOE.statusType.ToString()); // incorrect?
                     if (effect2AOEs.Length > 1)
@@ -500,7 +514,7 @@ public partial class Plugin : BaseUnityPlugin
             }
             else if (itemComponents[i].GetType() == typeof(Action_Die))
             {
-                itemInfoDisplayTextMesh.text += "YOU " + effectColors["Curse"] + "DIE</color> WHEN USED\n";
+                itemInfoDisplayTextMesh.text += GetText("Action_Die", effectColors["Curse"]);
             }
             else if (itemComponents[i].GetType() == typeof(Action_SpawnGuidebookPage))
             {
@@ -523,11 +537,11 @@ public partial class Plugin : BaseUnityPlugin
                 Action_MoraleBoost effect = (Action_MoraleBoost)itemComponents[i];
                 if (effect.boostRadius < 0)
                 {
-                    itemInfoDisplayTextMesh.text += effectColors["ItemInfoDisplayPositive"] + "GAIN</color> " + effectColors["Extra Stamina"] + (effect.baselineStaminaBoost * 100f).ToString("F1").Replace(".0", "") + " EXTRA STAMINA</color>\n";
+                    itemInfoDisplayTextMesh.text += GetText("MoraleBoost_Self", effectColors["ItemInfoDisplayPositive"], effectColors["Extra Stamina"], (effect.baselineStaminaBoost * 100f).ToString("F1").Replace(".0", ""));
                 }
                 else if (effect.boostRadius > 0)
                 {
-                    itemInfoDisplayTextMesh.text += "<#CCCCCC>NEARBY PLAYERS</color>" + effectColors["ItemInfoDisplayPositive"] + " GAIN</color> " + effectColors["Extra Stamina"] + (effect.baselineStaminaBoost * 100f).ToString("F1").Replace(".0", "") + " EXTRA STAMINA</color>\n";
+                    itemInfoDisplayTextMesh.text += GetText("MoraleBoost_Nearby", effectColors["ItemInfoDisplayPositive"], effectColors["Extra Stamina"], (effect.baselineStaminaBoost * 100f).ToString("F1").Replace(".0", ""));
                 }
             }
             else if (itemComponents[i].GetType() == typeof(Breakable))
@@ -590,26 +604,28 @@ public partial class Plugin : BaseUnityPlugin
             else if (itemComponents[i].GetType() == typeof(Dynamite))
             {
                 Dynamite effect = (Dynamite)itemComponents[i];
-                itemInfoDisplayTextMesh.text += effectColors["Injury"] + "EXPLODES</color> FOR UP TO " + effectColors["Injury"]
-                    + (effect.explosionPrefab.GetComponent<AOE>().statusAmount * 100f).ToString("F1").Replace(".0", "") + " INJURY</color>\n<#CCCCCC>ADDITIONAL DAMAGE TAKEN IF HELD</color>\n";
+                itemInfoDisplayTextMesh.text += GetText("Dynamite", effectColors["Injury"], (effect.explosionPrefab.GetComponent<AOE>().statusAmount * 100f).ToString("F1").Replace(".0", ""));
             }
             else if (itemComponents[i].GetType() == typeof(Scorpion))
             {
-                Scorpion effect = (Scorpion)itemComponents[i]; // wanted to hide poison info if dead, but mob state does not immediately update on equip leading to visual bug
+                Scorpion effect = (Scorpion)itemComponents[i];
                 if (configForceUpdateTime.Value <= 1f)
                 {
-                    float effectPoison = Mathf.Max(0.5f, (1f - item.holderCharacter.refs.afflictions.statusSum + 0.05f)) * 100f; // v.1.23.a BASED ON Scorpion.InflictAttack
-                    itemInfoDisplayTextMesh.text += "IF ALIVE, " + effectColors["Poison"] + "STINGS</color> YOU\n" + effectColors["Curse"] + "DIES</color> WHEN " + effectColors["Heat"] + "COOKED</color>\n\n"
-                        + "<#CCCCCC>NEXT STING WILL DEAL:</color>\n" + effectColors["Poison"] + effectPoison.ToString("F1").Replace(".0", "") + " POISON</color> OVER "
-                        + effect.totalPoisonTime.ToString("F1").Replace(".0", "") + "s\n<#CCCCCC>(MORE DAMAGE IF HEALTHY)</color>\n";
+                    float effectPoison = Mathf.Max(0.5f, (1f - item.holderCharacter.refs.afflictions.statusSum + 0.05f)) * 100f;
+                    itemInfoDisplayTextMesh.text += GetText("Scorpion_Dynamic",
+                        effectColors["Poison"],
+                        effectColors["Curse"],
+                        effectColors["Heat"],
+                        effectPoison.ToString("F1").Replace(".0", ""),
+                        effect.totalPoisonTime.ToString("F1").Replace(".0", ""));
                 }
                 else
                 {
-                    itemInfoDisplayTextMesh.text += "IF ALIVE, " + effectColors["Poison"] + "STINGS</color> YOU\n" + effectColors["Curse"]
-                        + "DIES</color> WHEN " + effectColors["Heat"] + "COOKED</color>\n\n" + "<#CCCCCC>NEXT STING WILL DEAL:</color>\nAT LEAST "
-                        + effectColors["Poison"] + "50 POISON</color> OVER " + effect.totalPoisonTime.ToString("F1").Replace(".0", "") + "s\nAT MOST "
-                        + effectColors["Poison"] + "105 POISON</color> OVER " + effect.totalPoisonTime.ToString("F1").Replace(".0", "")
-                        + "s\n<#CCCCCC>(MORE DAMAGE IF HEALTHY)</color>\n"; // v.1.23.a THERE'S NO VARIABLE FOR POISON AMOUNT, CALCULATED IN Scorpion.InflictAttack
+                    itemInfoDisplayTextMesh.text += GetText("Scorpion_Static",
+                        effectColors["Poison"],
+                        effectColors["Curse"],
+                        effectColors["Heat"],
+                        effect.totalPoisonTime.ToString("F1").Replace(".0", ""));
                 }
             }
             else if (itemComponents[i].GetType() == typeof(Action_Spawn))
@@ -636,6 +652,36 @@ public partial class Plugin : BaseUnityPlugin
             {
                 itemInfoDisplayTextMesh.text += $"{GetText("BingBongShieldWhileHolding", effectColors["Shield"])}";
                 //itemInfoDisplayTextMesh.text += "<#CCCCCC>WHILE EQUIPPED, GRANTS:</color>\n" + effectColors["Shield"] + "SHIELD</color> (INVINCIBILITY)\n";
+            }
+            else if (itemComponents[i].GetType() == typeof(RescueHook))
+            {
+                itemInfoDisplayTextMesh.text += $"{GetText("RescueHook")}";
+            }
+            else if (itemComponents[i].GetType() == typeof(Beehive))
+            {
+                itemInfoDisplayTextMesh.text += $"{GetText("Beehive", effectColors["Injury"], effectColors["Poison"])}";
+            }
+            else if (itemComponents[i].GetType() == typeof(Mandrake))
+            {
+                itemInfoDisplayTextMesh.text += $"{GetText("Mandrake", effectColors["Drowsy"], effectColors["Heat"])}";
+            }
+            else if (itemComponents[i].GetType() == typeof(Snowball))
+            {
+                itemInfoDisplayTextMesh.text += $"{GetText("Snowball", effectColors["Cold"])}";
+            }
+            else if (itemComponents[i].GetType() == typeof(StickyItemComponent))
+            {
+                StickyItemComponent effect = (StickyItemComponent)itemComponents[i];
+                string stickyText = GetText("StickyItemComponent", effectColors["Hunger"]);
+                if (effect.addWeightToStuckPlayer > 0)
+                {
+                    stickyText += GetText("StickyItemComponent_Weight", effectColors["Weight"], (effect.addWeightToStuckPlayer * 2.5f).ToString("F1").Replace(".0", ""));
+                }
+                if (effect.addThornsToStuckPlayer > 0)
+                {
+                    stickyText += GetText("StickyItemComponent_Thorns", effectColors["Thorns"], effect.addThornsToStuckPlayer.ToString());
+                }
+                itemInfoDisplayTextMesh.text += stickyText;
             }
             else if (itemComponents[i].GetType() == typeof(ItemCooking))
             {
@@ -782,43 +828,53 @@ public partial class Plugin : BaseUnityPlugin
         if (affliction.GetAfflictionType() is Peak.Afflictions.Affliction.AfflictionType.FasterBoi)
         {
             Peak.Afflictions.Affliction_FasterBoi effect = (Peak.Afflictions.Affliction_FasterBoi)affliction;
-            result += effectColors["ItemInfoDisplayPositive"] + "GAIN</color> " + (effect.totalTime + effect.climbDelay).ToString("F1").Replace(".0", "") + "s OF "
-                + effectColors["Extra Stamina"] + Mathf.Round(effect.moveSpeedMod * 100f).ToString("F1").Replace(".0", "") + "% BONUS RUN SPEED</color> OR\n"
-                + effectColors["ItemInfoDisplayPositive"] + "GAIN</color> " + effect.totalTime.ToString("F1").Replace(".0", "") + "s OF " + effectColors["Extra Stamina"]
-                + Mathf.Round(effect.climbSpeedMod * 100f).ToString("F1").Replace(".0", "") + "% BONUS CLIMB SPEED</color>\nAFTERWARDS, " + effectColors["ItemInfoDisplayNegative"]
-                + "GAIN</color> " + effectColors["Drowsy"] + (effect.drowsyOnEnd * 100f).ToString("F1").Replace(".0", "") + " DROWSY</color>\n";
+            result += GetText("Affliction_FasterBoi",
+                effectColors["ItemInfoDisplayPositive"],
+                (effect.totalTime + effect.climbDelay).ToString("F1").Replace(".0", ""),
+                effectColors["Extra Stamina"],
+                Mathf.Round(effect.moveSpeedMod * 100f).ToString("F1").Replace(".0", ""),
+                effect.totalTime.ToString("F1").Replace(".0", ""),
+                Mathf.Round(effect.climbSpeedMod * 100f).ToString("F1").Replace(".0", ""),
+                effectColors["ItemInfoDisplayNegative"],
+                effectColors["Drowsy"],
+                (effect.drowsyOnEnd * 100f).ToString("F1").Replace(".0", ""));
         }
         else if (affliction.GetAfflictionType() is Peak.Afflictions.Affliction.AfflictionType.ClearAllStatus)
         {
             Peak.Afflictions.Affliction_ClearAllStatus effect = (Peak.Afflictions.Affliction_ClearAllStatus)affliction;
-            result += effectColors["ItemInfoDisplayPositive"] + "CLEAR ALL STATUS</color>";
+            result += GetText("ClearAllStatus_Base", effectColors["ItemInfoDisplayPositive"]);
             if (effect.excludeCurse)
             {
-                result += " EXCEPT " + effectColors["Curse"] + "CURSE</color>";
+                result += GetText("ClearAllStatus_ExceptCurse", effectColors["Curse"]);
             }
             result += "\n";
         }
         else if (affliction.GetAfflictionType() is Peak.Afflictions.Affliction.AfflictionType.AddBonusStamina)
         {
             Peak.Afflictions.Affliction_AddBonusStamina effect = (Peak.Afflictions.Affliction_AddBonusStamina)affliction;
-            result += effectColors["ItemInfoDisplayPositive"] + "GAIN</color> " + effectColors["Extra Stamina"] + (effect.staminaAmount * 100f).ToString("F1").Replace(".0", "") + " EXTRA STAMINA</color>\n";
+            result += GetText("Affliction_AddBonusStamina", effectColors["ItemInfoDisplayPositive"], effectColors["Extra Stamina"], (effect.staminaAmount * 100f).ToString("F1").Replace(".0", ""));
         }
         else if (affliction.GetAfflictionType() is Peak.Afflictions.Affliction.AfflictionType.InfiniteStamina)
         {
             Peak.Afflictions.Affliction_InfiniteStamina effect = (Peak.Afflictions.Affliction_InfiniteStamina)affliction;
             if (effect.climbDelay > 0)
             {
-                result += effectColors["ItemInfoDisplayPositive"] + "GAIN</color> " + (effect.totalTime + effect.climbDelay).ToString("F1").Replace(".0", "") + "s OF "
-                    + effectColors["Extra Stamina"] + "INFINITE RUN STAMINA</color> OR\n" + effectColors["ItemInfoDisplayPositive"] + "GAIN</color> "
-                    + effect.totalTime.ToString("F1").Replace(".0", "") + "s OF " + effectColors["Extra Stamina"] + "INFINITE CLIMB STAMINA</color>\n";
+                result += GetText("Affliction_InfiniteStamina_Climb",
+                    effectColors["ItemInfoDisplayPositive"],
+                    (effect.totalTime + effect.climbDelay).ToString("F1").Replace(".0", ""),
+                    effectColors["Extra Stamina"],
+                    effect.totalTime.ToString("F1").Replace(".0", ""));
             }
             else
             {
-                result += effectColors["ItemInfoDisplayPositive"] + "GAIN</color> " + (effect.totalTime).ToString("F1").Replace(".0", "") + "s OF " + effectColors["Extra Stamina"] + "INFINITE STAMINA\n";
+                result += GetText("Affliction_InfiniteStamina",
+                    effectColors["ItemInfoDisplayPositive"],
+                    effect.totalTime.ToString("F1").Replace(".0", ""),
+                    effectColors["Extra Stamina"]);
             }
             if (effect.drowsyAffliction != null)
             {
-                result += "AFTERWARDS, " + ProcessAffliction(effect.drowsyAffliction);
+                result += GetText("AFTERWARDS") + ProcessAffliction(effect.drowsyAffliction);
             }
         }
         else if (affliction.GetAfflictionType() is Peak.Afflictions.Affliction.AfflictionType.AdjustStatus)
@@ -876,37 +932,29 @@ public partial class Plugin : BaseUnityPlugin
         }
         else if (affliction.GetAfflictionType() is Peak.Afflictions.Affliction.AfflictionType.DrowsyOverTime)
         {
-            Peak.Afflictions.Affliction_AdjustDrowsyOverTime effect = (Peak.Afflictions.Affliction_AdjustDrowsyOverTime)affliction; // 1.6.a
-            if (effect.statusPerSecond > 0)
-            {
-                result += effectColors["ItemInfoDisplayNegative"] + "GAIN</color> ";
-            }
-            else
-            {
-                result += effectColors["ItemInfoDisplayPositive"] + "REMOVE</color> ";
-            }
-            result += effectColors["Drowsy"] + (Mathf.Round((Mathf.Abs(effect.statusPerSecond) * effect.totalTime * 100f) * 0.4f) / 0.4f).ToString("F1").Replace(".0", "")
-                + " DROWSY</color> OVER " + effect.totalTime.ToString("F1").Replace(".0", "") + "s\n";
+            Peak.Afflictions.Affliction_AdjustDrowsyOverTime effect = (Peak.Afflictions.Affliction_AdjustDrowsyOverTime)affliction;
+            color = effect.statusPerSecond > 0 ? effectColors["ItemInfoDisplayNegative"] : effectColors["ItemInfoDisplayPositive"];
+            action = effect.statusPerSecond > 0 ? "GAIN" : "REMOVE";
+            result += GetText("ProcessEffectOverTime", color, GetText(action), effectColors["Drowsy"], (Mathf.Round((Mathf.Abs(effect.statusPerSecond) * effect.totalTime * 100f) * 0.4f) / 0.4f).ToString("F1").Replace(".0", ""), GetText("Effect_DROWSY").ToUpper(), effect.totalTime.ToString("F1").Replace(".0", ""));
         }
         else if (affliction.GetAfflictionType() is Peak.Afflictions.Affliction.AfflictionType.ColdOverTime)
         {
-            Peak.Afflictions.Affliction_AdjustColdOverTime effect = (Peak.Afflictions.Affliction_AdjustColdOverTime)affliction; // 1.6.a
-            if (effect.statusPerSecond > 0)
-            {
-                result += effectColors["ItemInfoDisplayNegative"] + "GAIN</color> ";
-            }
-            else
-            {
-                result += effectColors["ItemInfoDisplayPositive"] + "REMOVE</color> ";
-            }
-            result += effectColors["Cold"] + (Mathf.Abs(effect.statusPerSecond) * effect.totalTime * 100f).ToString("F1").Replace(".0", "")
-                + " COLD</color> OVER " + effect.totalTime.ToString("F1").Replace(".0", "") + "s\n";
+            Peak.Afflictions.Affliction_AdjustColdOverTime effect = (Peak.Afflictions.Affliction_AdjustColdOverTime)affliction;
+            color = effect.statusPerSecond > 0 ? effectColors["ItemInfoDisplayNegative"] : effectColors["ItemInfoDisplayPositive"];
+            action = effect.statusPerSecond > 0 ? "GAIN" : "REMOVE";
+            result += GetText("ProcessEffectOverTime", color, GetText(action), effectColors["Cold"], (Mathf.Abs(effect.statusPerSecond) * effect.totalTime * 100f).ToString("F1").Replace(".0", ""), GetText("Effect_COLD").ToUpper(), effect.totalTime.ToString("F1").Replace(".0", ""));
         }
         else if (affliction.GetAfflictionType() is Peak.Afflictions.Affliction.AfflictionType.Chaos)
         {
-            result += effectColors["ItemInfoDisplayPositive"] + "CLEAR ALL STATUS</color>, THEN RANDOMIZE\n" + effectColors["Hunger"] + "HUNGER</color>, "
-                + effectColors["Extra Stamina"] + "EXTRA STAMINA</color>, " + effectColors["Injury"] + "INJURY</color>,\n" + effectColors["Poison"] + "POISON</color>, "
-                + effectColors["Cold"] + "COLD</color>, " + effectColors["Hot"] + "HEAT</color>, " + effectColors["Drowsy"] + "DROWSY</color>\n";
+            result += GetText("Affliction_Chaos",
+                effectColors["ItemInfoDisplayPositive"],
+                effectColors["Hunger"],
+                effectColors["Extra Stamina"],
+                effectColors["Injury"],
+                effectColors["Poison"],
+                effectColors["Cold"],
+                effectColors["Hot"],
+                effectColors["Drowsy"]);
         }
         else if (affliction.GetAfflictionType() is Peak.Afflictions.Affliction.AfflictionType.Sunscreen)
         {
@@ -916,6 +964,113 @@ public partial class Plugin : BaseUnityPlugin
         }
 
         return result;
+    }
+
+    private static void HandleTestModeInput()
+    {
+        if (!Photon.Pun.PhotonNetwork.IsMasterClient) return;
+
+        // 初始化物品列表
+        if (!testModeInitialized)
+        {
+            InitializeTestItemList();
+            testModeInitialized = true;
+        }
+
+        // F1: 生成下一个物品
+        if (Input.GetKeyDown(KeyCode.F1))
+        {
+            SpawnNextTestItem();
+        }
+
+        // F2: 生成上一个物品
+        if (Input.GetKeyDown(KeyCode.F2))
+        {
+            SpawnPreviousTestItem();
+        }
+
+        // F3: 输出当前物品信息到日志
+        if (Input.GetKeyDown(KeyCode.F3))
+        {
+            LogCurrentItemInfo();
+        }
+    }
+
+    private static void InitializeTestItemList()
+    {
+        allItemPrefabs.Clear();
+        var items = Resources.FindObjectsOfTypeAll<Item>();
+        foreach (var item in items)
+        {
+            // 添加所有物品（包括 Prefab 和有特殊组件的）
+            if (!item.name.Contains("(Clone)"))
+            {
+                allItemPrefabs.Add(item);
+            }
+        }
+        allItemPrefabs = allItemPrefabs.OrderBy(i => i.name).ToList();
+        Log.LogInfo($"[TestMode] Found {allItemPrefabs.Count} items. Press F1/F2 to cycle, F3 to log current item info.");
+    }
+
+    private static void SpawnNextTestItem()
+    {
+        if (allItemPrefabs.Count == 0) return;
+
+        currentTestItemIndex = (currentTestItemIndex + 1) % allItemPrefabs.Count;
+        SpawnTestItem(currentTestItemIndex);
+    }
+
+    private static void SpawnPreviousTestItem()
+    {
+        if (allItemPrefabs.Count == 0) return;
+
+        currentTestItemIndex = (currentTestItemIndex - 1 + allItemPrefabs.Count) % allItemPrefabs.Count;
+        SpawnTestItem(currentTestItemIndex);
+    }
+
+    private static void SpawnTestItem(int index)
+    {
+        if (index < 0 || index >= allItemPrefabs.Count) return;
+
+        var prefab = allItemPrefabs[index];
+        var player = Character.localCharacter;
+        if (player == null) return;
+
+        Vector3 spawnPos = player.Center + player.transform.forward * 1.5f;
+
+        try
+        {
+            // 使用游戏内置的 PhotonNetwork.InstantiateItemRoom 生成物品
+            var spawnedObj = Photon.Pun.PhotonNetwork.InstantiateItemRoom(prefab.name, spawnPos, Quaternion.identity);
+            Log.LogInfo($"[TestMode] Spawned [{index + 1}/{allItemPrefabs.Count}]: {prefab.name}");
+
+            // 输出组件信息
+            var components = spawnedObj.GetComponents<Component>();
+            var componentNames = components.Select(c => c.GetType().Name).ToList();
+            Log.LogInfo($"[TestMode] Components: {string.Join(", ", componentNames)}");
+        }
+        catch (Exception e)
+        {
+            Log.LogError($"[TestMode] Failed to spawn {prefab.name}: {e.Message}");
+        }
+    }
+
+    private static void LogCurrentItemInfo()
+    {
+        var currentItem = Character.observedCharacter?.data?.currentItem;
+        if (currentItem == null)
+        {
+            Log.LogInfo("[TestMode] No item equipped");
+            return;
+        }
+
+        Log.LogInfo($"[TestMode] Current Item: {currentItem.name}");
+        var components = currentItem.GetComponents<Component>();
+        foreach (var c in components)
+        {
+            Log.LogInfo($"[TestMode]   - {c.GetType().Name}");
+        }
+        Log.LogInfo($"[TestMode] Display Text:\n{itemInfoDisplayTextMesh.text}");
     }
 
     private static void AddDisplayObject()
