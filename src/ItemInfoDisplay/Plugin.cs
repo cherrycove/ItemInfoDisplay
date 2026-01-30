@@ -18,6 +18,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.Rendering;
 
+using Zorro.Core;
 using Zorro.UI;
 using Zorro.UI.Effects;
 
@@ -80,7 +81,9 @@ public partial class Plugin : BaseUnityPlugin
                 else
                 {
                     // 测试模式：按键循环物品
-                    if (configEnableTestMode.Value)
+                    if (configEnableTestMode.Value
+                        && Character.localCharacter != null
+                        && ReferenceEquals(__instance.character, Character.localCharacter))
                     {
                         HandleTestModeInput();
                     }
@@ -968,12 +971,29 @@ public partial class Plugin : BaseUnityPlugin
 
     private static void HandleTestModeInput()
     {
-        if (!Photon.Pun.PhotonNetwork.IsMasterClient) return;
+        bool isOffline = Photon.Pun.PhotonNetwork.OfflineMode;
+        if (!isOffline)
+        {
+            if (!Photon.Pun.PhotonNetwork.IsConnected || !Photon.Pun.PhotonNetwork.InRoom) return;
+            if (!Photon.Pun.PhotonNetwork.IsMasterClient) return;
+        }
 
-        // 初始化物品列表
+        bool pressed = Input.GetKeyDown(KeyCode.F1)
+            || Input.GetKeyDown(KeyCode.F2)
+            || Input.GetKeyDown(KeyCode.F3);
+        if (!pressed) return;
+
+        Log.LogInfo($"[TestMode] Input detected. Mode={(isOffline ? "Offline" : "Online")} Connected={Photon.Pun.PhotonNetwork.IsConnected} InRoom={Photon.Pun.PhotonNetwork.InRoom} Master={Photon.Pun.PhotonNetwork.IsMasterClient}");
+
+        // 初始化物品列表（延迟到按键触发）
         if (!testModeInitialized)
         {
-            InitializeTestItemList();
+            Log.LogInfo("[TestMode] Initializing item list...");
+            if (!InitializeTestItemList())
+            {
+                Log.LogInfo("[TestMode] Initialization failed. Database not ready.");
+                return;
+            }
             testModeInitialized = true;
         }
 
@@ -996,20 +1016,24 @@ public partial class Plugin : BaseUnityPlugin
         }
     }
 
-    private static void InitializeTestItemList()
+    private static bool InitializeTestItemList()
     {
         allItemPrefabs.Clear();
-        var items = Resources.FindObjectsOfTypeAll<Item>();
-        foreach (var item in items)
+
+        var db = SingletonAsset<ItemDatabase>.Instance;
+        if (db == null || db.Objects == null || db.Objects.Count == 0)
         {
-            // 添加所有物品（包括 Prefab 和有特殊组件的）
-            if (!item.name.Contains("(Clone)"))
-            {
-                allItemPrefabs.Add(item);
-            }
+            int count = db?.Objects?.Count ?? -1;
+            Log.LogInfo($"[TestMode] ItemDatabase not ready or empty. Count={count}. Try again after fully entering a match or starting offline.");
+            return false;
         }
-        allItemPrefabs = allItemPrefabs.OrderBy(i => i.name).ToList();
-        Log.LogInfo($"[TestMode] Found {allItemPrefabs.Count} items. Press F1/F2 to cycle, F3 to log current item info.");
+
+        allItemPrefabs = db.Objects
+            .Where(i => i != null)
+            .OrderBy(i => i.name)
+            .ToList();
+        Log.LogInfo($"[TestMode] Loaded {allItemPrefabs.Count} items from ItemDatabase. Press F1/F2 to cycle, F3 to log current item info.");
+        return allItemPrefabs.Count > 0;
     }
 
     private static void SpawnNextTestItem()
