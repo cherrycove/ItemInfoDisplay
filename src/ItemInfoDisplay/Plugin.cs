@@ -1,28 +1,19 @@
 ﻿using BepInEx;
-using BepInEx.Bootstrap;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 
 using HarmonyLib;
 
-using MonoMod.Utils;
-
 using System;
 using System.Collections.Generic;
-using System.ComponentModel.Design;
-using System.Drawing;
 using System.Linq;
+using System.Reflection;
 
 using TMPro;
 
 using UnityEngine;
-using UnityEngine.Rendering;
 
 using Zorro.Core;
-using Zorro.UI;
-using Zorro.UI.Effects;
-
-using static MonoMod.Cil.RuntimeILReferenceBag.FastDelegateInvokers;
 
 namespace ItemInfoDisplay;
 
@@ -46,6 +37,17 @@ public partial class Plugin : BaseUnityPlugin
     private static List<Item> allItemPrefabs = new List<Item>();
     private static int currentTestItemIndex = 0;
     private static bool testModeInitialized = false;
+    private static bool testModeInputDisabled = false;
+    private static bool inputSystemChecked = false;
+    private static bool inputSystemAvailable = false;
+    private static PropertyInfo inputSystemKeyboardCurrentProp;
+    private static PropertyInfo inputSystemKeyboardItemProp;
+    private static PropertyInfo inputSystemKeyControlPressedProp;
+    private static Type inputSystemKeyType;
+    private static bool legacyInputAvailable = true;
+    private static HashSet<string> missingEffectColors = new HashSet<string>();
+    private static int lastLanternItemId = 0;
+    private static int lastLanternRemainingSeconds = -1;
 
     private void Awake()
     {
@@ -90,6 +92,7 @@ public partial class Plugin : BaseUnityPlugin
 
                     if (Character.observedCharacter.data.currentItem != null)
                     {
+                        UpdateLanternRefreshFlag(Character.observedCharacter.data.currentItem);
                         if (hasChanged)
                         {
                             hasChanged = false;
@@ -264,6 +267,11 @@ public partial class Plugin : BaseUnityPlugin
                 Action_ModifyStatus effect = (Action_ModifyStatus)itemComponents[i];
                 prefixStatus += ProcessEffect(effect.changeAmount, effect.statusType.ToString());
             }
+            else if (itemComponents[i].GetType() == typeof(Action_RandomMushroomEffect))
+            {
+                string randomText = BuildRandomMushroomEffectText(itemComponents[i]);
+                itemInfoDisplayTextMesh.text = AppendWithSectionSpacing(itemInfoDisplayTextMesh.text, randomText);
+            }
             else if (itemComponents[i].GetType() == typeof(Action_ApplyMassAffliction))
             {
                 Action_ApplyMassAffliction effect = (Action_ApplyMassAffliction)itemComponents[i];
@@ -340,23 +348,11 @@ public partial class Plugin : BaseUnityPlugin
                     //suffixAfflictions += "<#CCCCCC>WHEN LIT, NEARBY PLAYERS RECEIVE:</color>\n";
                 }
 
-                if (itemGameObj.name.Equals("Lantern_Faerie(Clone)"))
+                if (!itemGameObj.name.Equals("Torch(Clone)"))
                 {
-                    StatusField effect = itemGameObj.transform.Find("FaerieLantern/Light/Heat").GetComponent<StatusField>();
-                    suffixAfflictions += ProcessEffectOverTime(effect.statusAmountPerSecond, 1f, lantern.startingFuel, effect.statusType.ToString());
-                    foreach (StatusField.StatusFieldStatus status in effect.additionalStatuses)
-                    {
-                        if (suffixAfflictions.EndsWith('\n'))
-                        {
-                            suffixAfflictions = suffixAfflictions.Remove(suffixAfflictions.Length - 1);
-                        }
-                        suffixAfflictions += ",\n" + ProcessEffectOverTime(status.statusAmountPerSecond, 1f, lantern.startingFuel, status.statusType.ToString());
-                    }
-                }
-                else if (itemGameObj.name.Equals("Lantern(Clone)"))
-                {
-                    StatusField effect = itemGameObj.transform.Find("GasLantern/Light/Heat").GetComponent<StatusField>();
-                    suffixAfflictions += ProcessEffectOverTime(effect.statusAmountPerSecond, 1f, lantern.startingFuel, effect.statusType.ToString());
+                    int remainingSeconds = GetLanternRemainingSecondsInt(item, lantern);
+                    suffixAfflictions += GetText("LanternRemaining", remainingSeconds.ToString());
+                    suffixAfflictions = AppendLanternStatusPerSecond(itemGameObj, suffixAfflictions);
                 }
             }
             else if (itemComponents[i].GetType() == typeof(Action_RaycastDart))
@@ -482,22 +478,14 @@ public partial class Plugin : BaseUnityPlugin
             else if (itemComponents[i].GetType() == typeof(ShelfShroom))
             {
                 ShelfShroom effect = (ShelfShroom)itemComponents[i];
-                if (effect.instantiateOnBreak.name.Equals("HealingPuffShroomSpawn"))
+                if (effect.instantiateOnBreak == null)
                 {
-                    GameObject effect1 = effect.instantiateOnBreak.transform.Find("VFX_SporeHealingExplo").gameObject;
-                    AOE effect1AOE = effect1.GetComponent<AOE>();
-                    GameObject effect2 = effect1.transform.Find("VFX_SporePoisonExplo").gameObject;
-                    AOE effect2AOE = effect2.GetComponent<AOE>();
-                    AOE[] effect2AOEs = effect2.GetComponents<AOE>();
-                    TimeEvent effect2TimeEvent = effect2.GetComponent<TimeEvent>();
-                    RemoveAfterSeconds effect2RemoveAfterSeconds = effect2.GetComponent<RemoveAfterSeconds>();
+                    Log.LogWarning("[ItemInfoDisplay] ShelfShroom instantiateOnBreak was null. Skipping detailed info.");
+                }
+                else if (effect.instantiateOnBreak.name.Equals("HealingPuffShroomSpawn"))
+                {
                     itemInfoDisplayTextMesh.text += GetText("HealingPuffShroom", effectColors["Hunger"]);
-                    itemInfoDisplayTextMesh.text += ProcessEffect((Mathf.Round(effect1AOE.statusAmount * 0.9f * 40f) / 40f), effect1AOE.statusType.ToString()); // incorrect? calculates strangely so i somewhat manually adjusted the values
-                    itemInfoDisplayTextMesh.text += ProcessEffectOverTime((Mathf.Round(effect2AOE.statusAmount * (1f / effect2TimeEvent.rate) * 40f) / 40f), 1f, effect2RemoveAfterSeconds.seconds, effect2AOE.statusType.ToString()); // incorrect?
-                    if (effect2AOEs.Length > 1)
-                    {
-                        itemInfoDisplayTextMesh.text += ProcessEffectOverTime((Mathf.Round(effect2AOEs[1].statusAmount * (1f / effect2TimeEvent.rate) * 40f) / 40f), 1f, (effect2RemoveAfterSeconds.seconds + 1f), effect2AOEs[1].statusType.ToString()); // incorrect?
-                    } // didn't handle dynamically because there were 2 poison removal AOEs but 1 doesn't seem to work or they are buggy in some way (probably time event rate)?
+                    itemInfoDisplayTextMesh.text = AppendAoeInfoFromPrefab(effect.instantiateOnBreak, itemInfoDisplayTextMesh.text);
                 }
                 else if (effect.instantiateOnBreak.name.Equals("ShelfShroomSpawn"))
                 {
@@ -532,7 +520,7 @@ public partial class Plugin : BaseUnityPlugin
             }
             else if (itemComponents[i].GetType() == typeof(Action_CallScoutmaster))
             {
-                itemInfoDisplayTextMesh.text += $"{(GetText("CallScoutmaster", effectColors["Injury"]))}";
+                itemInfoDisplayTextMesh.text = AppendWithSectionSpacing(itemInfoDisplayTextMesh.text, $"{GetText("CallScoutmaster", effectColors["Injury"])}");
                 //itemInfoDisplayTextMesh.text += effectColors["Injury"] + "BREAKS RULE 0 WHEN USED</color>\n";
             }
             else if (itemComponents[i].GetType() == typeof(Action_MoraleBoost))
@@ -549,12 +537,12 @@ public partial class Plugin : BaseUnityPlugin
             }
             else if (itemComponents[i].GetType() == typeof(Breakable))
             {
-                itemInfoDisplayTextMesh.text += $"{GetText("Breakable", effectColors["Hunger"])}";
+                itemInfoDisplayTextMesh.text = AppendWithSectionSpacing(itemInfoDisplayTextMesh.text, $"{GetText("Breakable", effectColors["Hunger"])}");
                 //itemInfoDisplayTextMesh.text += effectColors["Hunger"] + "THROW</color> TO CRACK OPEN\n";
             }
             else if (itemComponents[i].GetType() == typeof(Bonkable))
             {
-                itemInfoDisplayTextMesh.text += $"{GetText("Bonkable", effectColors["Hunger"], effectColors["Injury"])}";
+                itemInfoDisplayTextMesh.text = AppendWithSectionSpacing(itemInfoDisplayTextMesh.text, $"{GetText("Bonkable", effectColors["Hunger"], effectColors["Injury"])}");
                 //itemInfoDisplayTextMesh.text += effectColors["Hunger"] + "THROW</color> AT HEAD TO " + effectColors["Injury"] + "BONK</color>\n";
             }
             else if (itemComponents[i].GetType() == typeof(MagicBean))
@@ -664,6 +652,10 @@ public partial class Plugin : BaseUnityPlugin
             {
                 itemInfoDisplayTextMesh.text += $"{GetText("Beehive", effectColors["Injury"], effectColors["Poison"])}";
             }
+            else if (itemComponents[i].GetType() == typeof(BugPhobia))
+            {
+                itemInfoDisplayTextMesh.text = AppendWithSectionSpacing(itemInfoDisplayTextMesh.text, GetText("BugPhobia"));
+            }
             else if (itemComponents[i].GetType() == typeof(Mandrake))
             {
                 itemInfoDisplayTextMesh.text += $"{GetText("Mandrake", effectColors["Drowsy"], effectColors["Heat"])}";
@@ -742,8 +734,374 @@ public partial class Plugin : BaseUnityPlugin
         {
             itemInfoDisplayTextMesh.text += "\n" + suffixAfflictions;
         }
-        itemInfoDisplayTextMesh.text += "\n" + suffixWeight + suffixUses + suffixCooked;
-        itemInfoDisplayTextMesh.text = itemInfoDisplayTextMesh.text.Replace("\n\n\n", "\n\n");
+        string suffixBlock = suffixWeight + suffixUses + suffixCooked;
+        if (!string.IsNullOrEmpty(suffixBlock))
+        {
+            if (itemInfoDisplayTextMesh.text.Length > 0)
+            {
+                if (itemInfoDisplayTextMesh.text.EndsWith("\n\n"))
+                {
+                    // already has a blank line before suffix
+                }
+                else if (itemInfoDisplayTextMesh.text.EndsWith("\n"))
+                {
+                    itemInfoDisplayTextMesh.text += "\n";
+                }
+                else
+                {
+                    itemInfoDisplayTextMesh.text += "\n\n";
+                }
+            }
+            itemInfoDisplayTextMesh.text += suffixBlock;
+        }
+        while (itemInfoDisplayTextMesh.text.Contains("\n\n\n"))
+        {
+            itemInfoDisplayTextMesh.text = itemInfoDisplayTextMesh.text.Replace("\n\n\n", "\n\n");
+        }
+    }
+
+    private static string AppendWithSectionSpacing(string target, string addition)
+    {
+        if (string.IsNullOrEmpty(addition))
+        {
+            return target;
+        }
+
+        if (target.Length > 0 && !target.EndsWith("\n\n"))
+        {
+            target += target.EndsWith("\n") ? "\n" : "\n\n";
+        }
+
+        target += addition;
+        return target;
+    }
+
+    private static string AppendAoeInfoFromPrefab(GameObject prefab, string target)
+    {
+        if (prefab == null)
+        {
+            return target;
+        }
+
+        AOE[] aoes = prefab.GetComponentsInChildren<AOE>(true);
+        if (aoes == null || aoes.Length == 0)
+        {
+            Log.LogWarning("[ItemInfoDisplay] No AOE components found on HealingPuffShroom prefab. Effect info unavailable.");
+            return target;
+        }
+
+        TimeEvent fallbackTimeEvent = prefab.GetComponentInChildren<TimeEvent>(true);
+        RemoveAfterSeconds fallbackRemoveAfter = prefab.GetComponentInChildren<RemoveAfterSeconds>(true);
+
+        Dictionary<string, float> instantTotals = new Dictionary<string, float>();
+        Dictionary<(string status, float duration), float> overtimeTotals = new Dictionary<(string status, float duration), float>();
+
+        foreach (AOE aoe in aoes)
+        {
+            if (aoe == null)
+            {
+                continue;
+            }
+
+            string statusType = aoe.statusType.ToString();
+            if (string.IsNullOrEmpty(statusType))
+            {
+                continue;
+            }
+
+            TimeEvent timeEvent = aoe.GetComponent<TimeEvent>() ?? aoe.GetComponentInParent<TimeEvent>() ?? fallbackTimeEvent;
+            RemoveAfterSeconds removeAfter = aoe.GetComponent<RemoveAfterSeconds>() ?? aoe.GetComponentInParent<RemoveAfterSeconds>() ?? fallbackRemoveAfter;
+            if (timeEvent != null && removeAfter != null && timeEvent.rate > 0f && removeAfter.seconds > 0f)
+            {
+                float amountPerSecond = aoe.statusAmount / timeEvent.rate;
+                var key = (status: statusType, duration: removeAfter.seconds);
+                overtimeTotals[key] = overtimeTotals.TryGetValue(key, out float existing) ? (existing + amountPerSecond) : amountPerSecond;
+            }
+            else
+            {
+                float amount = aoe.statusAmount;
+                instantTotals[statusType] = instantTotals.TryGetValue(statusType, out float existing) ? (existing + amount) : amount;
+            }
+        }
+
+        foreach (var kvp in instantTotals.OrderBy(k => k.Key))
+        {
+            float amount = Mathf.Round(kvp.Value * 40f) / 40f;
+            target += ProcessEffect(amount, kvp.Key);
+        }
+
+        foreach (var kvp in overtimeTotals.OrderBy(k => k.Key.status).ThenBy(k => k.Key.duration))
+        {
+            float amountPerSecond = Mathf.Round(kvp.Value * 40f) / 40f;
+            target += ProcessEffectPerSecondOverTime(amountPerSecond, kvp.Key.duration, kvp.Key.status);
+        }
+
+        return target;
+    }
+
+    private static string AppendLanternStatusPerSecond(GameObject itemGameObj, string target)
+    {
+        if (itemGameObj == null)
+        {
+            return target;
+        }
+
+        StatusField[] fields = itemGameObj.GetComponentsInChildren<StatusField>(true);
+        if (fields == null || fields.Length == 0)
+        {
+            return target;
+        }
+
+        Dictionary<string, float> totals = new Dictionary<string, float>();
+        Dictionary<string, float> entryTotals = new Dictionary<string, float>();
+        foreach (StatusField field in fields)
+        {
+            if (field == null)
+            {
+                continue;
+            }
+
+            string statusType = field.statusType.ToString();
+            if (!string.IsNullOrEmpty(statusType))
+            {
+                totals[statusType] = totals.TryGetValue(statusType, out float existing) ? (existing + field.statusAmountPerSecond) : field.statusAmountPerSecond;
+                if (field.statusAmountOnEntry != 0f)
+                {
+                    entryTotals[statusType] = entryTotals.TryGetValue(statusType, out float entryExisting)
+                        ? (entryExisting + field.statusAmountOnEntry)
+                        : field.statusAmountOnEntry;
+                }
+            }
+
+            foreach (StatusField.StatusFieldStatus status in field.additionalStatuses)
+            {
+                string additionalType = status.statusType.ToString();
+                if (string.IsNullOrEmpty(additionalType))
+                {
+                    continue;
+                }
+                totals[additionalType] = totals.TryGetValue(additionalType, out float existing) ? (existing + status.statusAmountPerSecond) : status.statusAmountPerSecond;
+            }
+        }
+
+        AddFaerieLanternSporesPerSecond(itemGameObj, totals);
+
+        foreach (var kvp in totals.OrderBy(k => k.Key))
+        {
+            target += ProcessEffectPerSecond(kvp.Value, kvp.Key);
+        }
+
+        foreach (var kvp in entryTotals.OrderBy(k => k.Key))
+        {
+            target += ProcessEffectOnEntry(kvp.Value, kvp.Key);
+        }
+
+        if (TryGetDispelFogFieldInfo(itemGameObj, out float innerRadius, out float outerRadius))
+        {
+            target += GetText(
+                "DispelFogField_Strength",
+                effectColors["ItemInfoDisplayPositive"],
+                GetEffectColor("Spores"),
+                innerRadius.ToString("F1").Replace(".0", ""),
+                outerRadius.ToString("F1").Replace(".0", ""));
+        }
+
+        return target;
+    }
+
+    private static void AddFaerieLanternSporesPerSecond(GameObject itemGameObj, Dictionary<string, float> totals)
+    {
+        if (totals == null || itemGameObj == null)
+        {
+            return;
+        }
+
+        if (!IsFaerieLantern(itemGameObj))
+        {
+            return;
+        }
+
+        const float faerieSporesPerSecond = -0.025f;
+        totals["Spores"] = totals.TryGetValue("Spores", out float existing)
+            ? (existing + faerieSporesPerSecond)
+            : faerieSporesPerSecond;
+    }
+
+    private static bool IsFaerieLantern(GameObject itemGameObj)
+    {
+        if (itemGameObj == null)
+        {
+            return false;
+        }
+
+        string name = itemGameObj.name ?? string.Empty;
+        return name.StartsWith("Lantern_Faerie", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryGetDispelFogFieldInfo(GameObject itemGameObj, out float innerRadius, out float outerRadius)
+    {
+        innerRadius = 0f;
+        outerRadius = 0f;
+        if (itemGameObj == null)
+        {
+            return false;
+        }
+
+        Component[] components = itemGameObj.GetComponentsInChildren<Component>(true);
+        foreach (Component component in components)
+        {
+            if (component == null)
+            {
+                continue;
+            }
+
+            if (component.GetType().Name == "DispelFogField")
+            {
+                Type type = component.GetType();
+                FieldInfo innerField = type.GetField("innerRadius", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                FieldInfo outerField = type.GetField("outerRadius", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (innerField != null)
+                {
+                    innerRadius = (float)innerField.GetValue(component);
+                }
+                if (outerField != null)
+                {
+                    outerRadius = (float)outerField.GetValue(component);
+                }
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string BuildRandomMushroomEffectText(object effect)
+    {
+        if (effect is Action_RandomMushroomEffect)
+        {
+            return BuildRandomMushroomEffectListText();
+        }
+
+        if (effect == null)
+        {
+            return GetText("RandomMushroomEffect");
+        }
+
+        HashSet<string> statusTypes = new HashSet<string>();
+        CollectStatusTypes(effect, statusTypes);
+
+        if (statusTypes.Count == 0)
+        {
+            return GetText("RandomMushroomEffect");
+        }
+
+        List<string> parts = new List<string>();
+        foreach (string status in statusTypes)
+        {
+            parts.Add(FormatEffectNameWithColor(status));
+        }
+
+        string listText = string.Join(", ", parts);
+        return GetText("RandomMushroomEffect_List", listText);
+    }
+
+    private static string BuildRandomMushroomEffectListText()
+    {
+        string result = GetText("RandomMushroomEffect_Title");
+        result += GetText("RandomMushroomEffect_0", effectColors["Extra Stamina"], "4");
+        result += GetText("RandomMushroomEffect_1", effectColors["ItemInfoDisplayPositive"], "50", "150", "5", "1");
+        result += GetText("RandomMushroomEffect_2", effectColors["ItemInfoDisplayPositive"], "3", "15");
+        result += GetText("RandomMushroomEffect_3", effectColors["ItemInfoDisplayPositive"], "10");
+        result += GetText("RandomMushroomEffect_4",
+            effectColors["ItemInfoDisplayPositive"],
+            effectColors["Hunger"],
+            effectColors["Injury"],
+            effectColors["Poison"],
+            "<#CCCCCC>");
+        result += GetText("RandomMushroomEffect_5", effectColors["Spores"]);
+        result += GetText("RandomMushroomEffect_6", effectColors["ItemInfoDisplayNegative"], "60");
+        result += GetText("RandomMushroomEffect_7", effectColors["ItemInfoDisplayNegative"]);
+        result += GetText("RandomMushroomEffect_8", effectColors["ItemInfoDisplayNegative"], effectColors["Spores"]);
+        result += GetText("RandomMushroomEffect_9", effectColors["ItemInfoDisplayNegative"], "60");
+        return result;
+    }
+
+    private static void CollectStatusTypes(object value, HashSet<string> statusTypes)
+    {
+        if (value == null)
+        {
+            return;
+        }
+
+        if (value is CharacterAfflictions.STATUSTYPE statusType)
+        {
+            statusTypes.Add(statusType.ToString());
+            return;
+        }
+
+        if (value is Peak.Afflictions.Affliction affliction)
+        {
+            statusTypes.Add(affliction.GetAfflictionType().ToString());
+            return;
+        }
+
+        if (value is System.Collections.IEnumerable enumerable && value is not string)
+        {
+            foreach (object entry in enumerable)
+            {
+                CollectStatusTypes(entry, statusTypes);
+            }
+            return;
+        }
+
+        Type type = value.GetType();
+        if (!type.IsClass)
+        {
+            return;
+        }
+
+        foreach (FieldInfo field in type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+        {
+            if (field.FieldType == typeof(string))
+            {
+                continue;
+            }
+            object fieldValue = field.GetValue(value);
+            CollectStatusTypes(fieldValue, statusTypes);
+        }
+
+        foreach (PropertyInfo prop in type.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+        {
+            if (!prop.CanRead || prop.GetIndexParameters().Length > 0 || prop.PropertyType == typeof(string))
+            {
+                continue;
+            }
+            object propValue = null;
+            try
+            {
+                propValue = prop.GetValue(value, null);
+            }
+            catch
+            {
+                continue;
+            }
+            CollectStatusTypes(propValue, statusTypes);
+        }
+    }
+
+    private static string FormatEffectNameWithColor(string effect)
+    {
+        string name;
+        try
+        {
+            name = GetText($"Effect_{effect.ToUpper()}").ToUpper();
+        }
+        catch
+        {
+            name = effect.ToUpper();
+        }
+
+        return $"{GetEffectColor(effect)}{name}</color>";
     }
 
     private static string ProcessEffect(float amount, string effect)
@@ -779,7 +1137,7 @@ public partial class Plugin : BaseUnityPlugin
             }
             action = "REMOVE";
         }
-        result += GetText("ProcessEffect", color, GetText(action), effectColors[effect], (Mathf.Abs(amount) * 100f).ToString("F1").Replace(".0", ""), GetText($"Effect_{effect.ToUpper()}").ToUpper());
+        result += GetText("ProcessEffect", color, GetText(action), GetEffectColor(effect), (Mathf.Abs(amount) * 100f).ToString("F1").Replace(".0", ""), GetText($"Effect_{effect.ToUpper()}").ToUpper());
 
         //result += effectColors[effect] + (Mathf.Abs(amount) * 100f).ToString("F1").Replace(".0", "") + " " + effect.ToUpper() + "</color>\n";
 
@@ -819,8 +1177,197 @@ public partial class Plugin : BaseUnityPlugin
             }
             action = "REMOVE";
         }
-        result += GetText("ProcessEffectOverTime", color, GetText(action), effectColors[effect], ((Mathf.Abs(amountPerSecond) * time * (1 / rate)) * 100f).ToString("F1").Replace(".0", ""), GetText($"Effect_{effect.ToUpper()}").ToUpper(), time.ToString());
+        result += GetText("ProcessEffectOverTime", color, GetText(action), GetEffectColor(effect), ((Mathf.Abs(amountPerSecond) * time * (1 / rate)) * 100f).ToString("F1").Replace(".0", ""), GetText($"Effect_{effect.ToUpper()}").ToUpper(), time.ToString());
         return result;
+    }
+
+    private static string ProcessEffectPerSecond(float amountPerSecond, string effect)
+    {
+        string result = "";
+        var color = string.Empty;
+        var action = string.Empty;
+        if (amountPerSecond == 0)
+        {
+            return result;
+        }
+        else if (amountPerSecond > 0)
+        {
+            if (effect.Equals("Extra Stamina"))
+            {
+                color = effectColors["ItemInfoDisplayPositive"];
+            }
+            else
+            {
+                color = effectColors["ItemInfoDisplayNegative"];
+            }
+            action = "GAIN";
+        }
+        else if (amountPerSecond < 0)
+        {
+            if (effect.Equals("Extra Stamina"))
+            {
+                color = effectColors["ItemInfoDisplayNegative"];
+            }
+            else
+            {
+                color = effectColors["ItemInfoDisplayPositive"];
+            }
+            action = "REMOVE";
+        }
+
+        string perSecond = (Mathf.Abs(amountPerSecond) * 100f).ToString("F1").Replace(".0", "");
+        result += GetText("ProcessEffectPerSecond", color, GetText(action), GetEffectColor(effect), perSecond, GetText($"Effect_{effect.ToUpper()}").ToUpper());
+        return result;
+    }
+
+    private static string ProcessEffectPerSecondOverTime(float amountPerSecond, float time, string effect)
+    {
+        string result = "";
+        var color = string.Empty;
+        var action = string.Empty;
+        if ((amountPerSecond == 0) || (time <= 0))
+        {
+            return result;
+        }
+        else if (amountPerSecond > 0)
+        {
+            if (effect.Equals("Extra Stamina"))
+            {
+                color = effectColors["ItemInfoDisplayPositive"];
+            }
+            else
+            {
+                color = effectColors["ItemInfoDisplayNegative"];
+            }
+            action = "GAIN";
+        }
+        else if (amountPerSecond < 0)
+        {
+            if (effect.Equals("Extra Stamina"))
+            {
+                color = effectColors["ItemInfoDisplayNegative"];
+            }
+            else
+            {
+                color = effectColors["ItemInfoDisplayPositive"];
+            }
+            action = "REMOVE";
+        }
+
+        string perSecond = (Mathf.Abs(amountPerSecond) * 100f).ToString("F1").Replace(".0", "");
+        string timeText = time.ToString("F1").Replace(".0", "");
+        result += GetText("ProcessEffectPerSecondOverTime", color, GetText(action), GetEffectColor(effect), perSecond, GetText($"Effect_{effect.ToUpper()}").ToUpper(), timeText);
+        return result;
+    }
+
+    private static string ProcessEffectOnEntry(float amount, string effect)
+    {
+        string result = "";
+        var color = string.Empty;
+        var action = string.Empty;
+        if (amount == 0)
+        {
+            return result;
+        }
+        else if (amount > 0)
+        {
+            if (effect.Equals("Extra Stamina"))
+            {
+                color = effectColors["ItemInfoDisplayPositive"];
+            }
+            else
+            {
+                color = effectColors["ItemInfoDisplayNegative"];
+            }
+            action = "GAIN";
+        }
+        else if (amount < 0)
+        {
+            if (effect.Equals("Extra Stamina"))
+            {
+                color = effectColors["ItemInfoDisplayNegative"];
+            }
+            else
+            {
+                color = effectColors["ItemInfoDisplayPositive"];
+            }
+            action = "REMOVE";
+        }
+
+        result += GetText("ProcessEffectOnEntry", color, GetText(action), GetEffectColor(effect), (Mathf.Abs(amount) * 100f).ToString("F1").Replace(".0", ""), GetText($"Effect_{effect.ToUpper()}").ToUpper());
+        return result;
+    }
+
+    private static string GetEffectColor(string effect)
+    {
+        if (effectColors.TryGetValue(effect, out string color))
+        {
+            return color;
+        }
+
+        if (!missingEffectColors.Contains(effect))
+        {
+            missingEffectColors.Add(effect);
+            Log.LogWarning($"[ItemInfoDisplay] Missing effect color mapping for '{effect}'. Using fallback.");
+        }
+
+        return "<#CCCCCC>";
+    }
+
+    private static float GetLanternRemainingSeconds(Item item, Lantern lantern)
+    {
+        try
+        {
+            if (item?.data?.data != null && item.data.data.ContainsKey(DataEntryKey.Fuel))
+            {
+                object fuelData = item.data.data[DataEntryKey.Fuel];
+                if (fuelData is FloatItemData floatData)
+                {
+                    return floatData.Value;
+                }
+            }
+        }
+        catch
+        {
+            // ignore and fallback
+        }
+
+        return lantern != null ? lantern.startingFuel : 0f;
+    }
+
+    private static void UpdateLanternRefreshFlag(Item item)
+    {
+        Lantern lantern = item != null ? item.GetComponent<Lantern>() : null;
+        if (lantern == null)
+        {
+            lastLanternItemId = 0;
+            lastLanternRemainingSeconds = -1;
+            return;
+        }
+
+        int remainingSeconds = GetLanternRemainingSecondsInt(item, lantern);
+        int itemId = item.GetInstanceID();
+
+        if (itemId != lastLanternItemId)
+        {
+            lastLanternItemId = itemId;
+            lastLanternRemainingSeconds = remainingSeconds;
+            hasChanged = true;
+            return;
+        }
+
+        if (remainingSeconds != lastLanternRemainingSeconds)
+        {
+            lastLanternRemainingSeconds = remainingSeconds;
+            hasChanged = true;
+        }
+    }
+
+    private static int GetLanternRemainingSecondsInt(Item item, Lantern lantern)
+    {
+        float remainingSeconds = GetLanternRemainingSeconds(item, lantern);
+        int remainingInt = Mathf.CeilToInt(remainingSeconds);
+        return Mathf.Max(0, remainingInt);
     }
 
     private static string ProcessAffliction(Peak.Afflictions.Affliction affliction)
@@ -957,7 +1504,9 @@ public partial class Plugin : BaseUnityPlugin
                 effectColors["Poison"],
                 effectColors["Cold"],
                 effectColors["Hot"],
-                effectColors["Drowsy"]);
+                effectColors["Drowsy"],
+                effectColors["Thorns"],
+                effectColors["Spores"]);
         }
         else if (affliction.GetAfflictionType() is Peak.Afflictions.Affliction.AfflictionType.Sunscreen)
         {
@@ -978,9 +1527,9 @@ public partial class Plugin : BaseUnityPlugin
             if (!Photon.Pun.PhotonNetwork.IsMasterClient) return;
         }
 
-        bool pressed = Input.GetKeyDown(KeyCode.F1)
-            || Input.GetKeyDown(KeyCode.F2)
-            || Input.GetKeyDown(KeyCode.F3);
+        bool pressed = IsTestKeyDown(KeyCode.F1)
+            || IsTestKeyDown(KeyCode.F2)
+            || IsTestKeyDown(KeyCode.F3);
         if (!pressed) return;
 
         Log.LogInfo($"[TestMode] Input detected. Mode={(isOffline ? "Offline" : "Online")} Connected={Photon.Pun.PhotonNetwork.IsConnected} InRoom={Photon.Pun.PhotonNetwork.InRoom} Master={Photon.Pun.PhotonNetwork.IsMasterClient}");
@@ -998,21 +1547,113 @@ public partial class Plugin : BaseUnityPlugin
         }
 
         // F1: 生成下一个物品
-        if (Input.GetKeyDown(KeyCode.F1))
+        if (IsTestKeyDown(KeyCode.F1))
         {
             SpawnNextTestItem();
         }
 
         // F2: 生成上一个物品
-        if (Input.GetKeyDown(KeyCode.F2))
+        if (IsTestKeyDown(KeyCode.F2))
         {
             SpawnPreviousTestItem();
         }
 
         // F3: 输出当前物品信息到日志
-        if (Input.GetKeyDown(KeyCode.F3))
+        if (IsTestKeyDown(KeyCode.F3))
         {
             LogCurrentItemInfo();
+        }
+    }
+
+    private static bool IsTestKeyDown(KeyCode keyCode)
+    {
+        if (testModeInputDisabled) return false;
+
+        if (TryGetInputSystemKeyDown(keyCode, out bool pressedByInputSystem))
+        {
+            return pressedByInputSystem;
+        }
+
+        if (TryGetLegacyInputKeyDown(keyCode, out bool pressedByLegacy))
+        {
+            return pressedByLegacy;
+        }
+
+        testModeInputDisabled = true;
+        Log.LogWarning("[TestMode] Input not available. Disabling test mode input checks.");
+        return false;
+    }
+
+    private static bool TryGetInputSystemKeyDown(KeyCode keyCode, out bool pressed)
+    {
+        pressed = false;
+
+        if (!inputSystemChecked)
+        {
+            inputSystemAvailable = InitializeInputSystemReflection();
+            inputSystemChecked = true;
+        }
+
+        if (!inputSystemAvailable) return false;
+
+        try
+        {
+            var keyboard = inputSystemKeyboardCurrentProp?.GetValue(null, null);
+            if (keyboard == null) return true;
+
+            var keyEnum = Enum.Parse(inputSystemKeyType, keyCode.ToString());
+            var keyControl = inputSystemKeyboardItemProp?.GetValue(keyboard, new[] { keyEnum });
+            if (keyControl == null) return true;
+
+            pressed = (bool)inputSystemKeyControlPressedProp.GetValue(keyControl, null);
+            return true;
+        }
+        catch (Exception e)
+        {
+            inputSystemAvailable = false;
+            Log.LogWarning($"[TestMode] Input System unavailable ({e.GetType().Name}). Falling back to legacy input.");
+            return false;
+        }
+    }
+
+    private static bool InitializeInputSystemReflection()
+    {
+        try
+        {
+            var keyboardType = Type.GetType("UnityEngine.InputSystem.Keyboard, Unity.InputSystem");
+            inputSystemKeyType = Type.GetType("UnityEngine.InputSystem.Key, Unity.InputSystem");
+            var keyControlType = Type.GetType("UnityEngine.InputSystem.Controls.KeyControl, Unity.InputSystem");
+            if (keyboardType == null || inputSystemKeyType == null || keyControlType == null) return false;
+
+            inputSystemKeyboardCurrentProp = keyboardType.GetProperty("current", BindingFlags.Public | BindingFlags.Static);
+            inputSystemKeyboardItemProp = keyboardType.GetProperty("Item", BindingFlags.Public | BindingFlags.Instance);
+            inputSystemKeyControlPressedProp = keyControlType.GetProperty("wasPressedThisFrame", BindingFlags.Public | BindingFlags.Instance);
+
+            return inputSystemKeyboardCurrentProp != null
+                && inputSystemKeyboardItemProp != null
+                && inputSystemKeyControlPressedProp != null;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryGetLegacyInputKeyDown(KeyCode keyCode, out bool pressed)
+    {
+        pressed = false;
+        if (!legacyInputAvailable) return false;
+
+        try
+        {
+            pressed = Input.GetKeyDown(keyCode);
+            return true;
+        }
+        catch (Exception e)
+        {
+            legacyInputAvailable = false;
+            Log.LogWarning($"[TestMode] Legacy Input unavailable ({e.GetType().Name}).");
+            return false;
         }
     }
 
@@ -1159,6 +1800,7 @@ public partial class Plugin : BaseUnityPlugin
         dict.Add("Curse", "<#1B0043>");
         dict.Add("Weight", "<#A65A1C>");
         dict.Add("Thorns", "<#768E00>");
+        dict.Add("Spores", "<#A45B63>");
         dict.Add("Shield", "<#D48E00>");
 
         dict.Add("ItemInfoDisplayPositive", "<#DDFFDD>");

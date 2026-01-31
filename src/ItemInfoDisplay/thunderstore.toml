@@ -5,10 +5,10 @@ schemaVersion = "0.0.1"
 repository = "https://thunderstore.io"
 
 [package]
-namespace = "jkqt"
-name = "ItemInfoDisplay"
-description = "Displays item information."
-websiteUrl = "https://github.com/jkqt/ItemInfoDisplay"
+namespace = "cherrycove"
+name = "ItemInfoDisplayForkedCNPlus"
+description = "Displays item information (CN localization, updated for new PEAK versions). I will update promptly after game updates when time allows."
+websiteUrl = "https://github.com/cherrycove/ItemInfoDisplay"
 containsNsfwContent = false
 
 [package.dependencies]
@@ -20,7 +20,7 @@ readme = "../../README.md"
 outdir = "../../artifacts/thunderstore/"
 
 [[build.copy]]
-source = "../../artifacts/bin/ItemInfoDisplay/release/com.github.jkqt.ItemInfoDisplay.dll"
+source = "../../artifacts/bin/ItemInfoDisplay/release/com.github.cherrycove.ItemInfoDisplay.dll"
 target = "plugins/"
 
 [[build.copy]]
