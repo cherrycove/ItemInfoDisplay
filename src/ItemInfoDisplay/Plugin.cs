@@ -188,6 +188,11 @@ public partial class Plugin : BaseUnityPlugin
     private static void ProcessItemGameObject()
     {
         Item item = Character.observedCharacter.data.currentItem; // not sure why this broke after THE MESA update, made no changes (just rebuilt)
+        ProcessItemGameObject(item);
+    }
+
+    private static void ProcessItemGameObject(Item item)
+    {
         GameObject itemGameObj = item.gameObject;
         Component[] itemComponents = itemGameObj.GetComponents(typeof(Component)).GroupBy(c => c.GetType()).Select(g => g.First()).ToArray();
         bool isConsumable = false;
@@ -602,7 +607,11 @@ public partial class Plugin : BaseUnityPlugin
                 Scorpion effect = (Scorpion)itemComponents[i];
                 if (configForceUpdateTime.Value <= 1f)
                 {
-                    float effectPoison = Mathf.Max(0.5f, (1f - item.holderCharacter.refs.afflictions.statusSum + 0.05f)) * 100f;
+                    Character holderForStatus = item.holderCharacter ?? Character.observedCharacter;
+                    float statusSum = (holderForStatus != null && holderForStatus.refs != null && holderForStatus.refs.afflictions != null)
+                        ? holderForStatus.refs.afflictions.statusSum
+                        : 0f;
+                    float effectPoison = Mathf.Max(0.5f, (1f - statusSum + 0.05f)) * 100f;
                     itemInfoDisplayTextMesh.text += GetText("Scorpion_Dynamic",
                         effectColors["Poison"],
                         effectColors["Curse"],
@@ -1529,7 +1538,8 @@ public partial class Plugin : BaseUnityPlugin
 
         bool pressed = IsTestKeyDown(KeyCode.F1)
             || IsTestKeyDown(KeyCode.F2)
-            || IsTestKeyDown(KeyCode.F3);
+            || IsTestKeyDown(KeyCode.F3)
+            || IsTestKeyDown(KeyCode.F4);
         if (!pressed) return;
 
         Log.LogInfo($"[TestMode] Input detected. Mode={(isOffline ? "Offline" : "Online")} Connected={Photon.Pun.PhotonNetwork.IsConnected} InRoom={Photon.Pun.PhotonNetwork.InRoom} Master={Photon.Pun.PhotonNetwork.IsMasterClient}");
@@ -1562,6 +1572,12 @@ public partial class Plugin : BaseUnityPlugin
         if (IsTestKeyDown(KeyCode.F3))
         {
             LogCurrentItemInfo();
+        }
+
+        // F4: 输出所有物品信息到日志
+        if (IsTestKeyDown(KeyCode.F4))
+        {
+            LogAllItemInfo();
         }
     }
 
@@ -1673,7 +1689,7 @@ public partial class Plugin : BaseUnityPlugin
             .Where(i => i != null)
             .OrderBy(i => i.name)
             .ToList();
-        Log.LogInfo($"[TestMode] Loaded {allItemPrefabs.Count} items from ItemDatabase. Press F1/F2 to cycle, F3 to log current item info.");
+        Log.LogInfo($"[TestMode] Loaded {allItemPrefabs.Count} items from ItemDatabase. Press F1/F2 to cycle, F3 to log current item info, F4 to log all items.");
         return allItemPrefabs.Count > 0;
     }
 
@@ -1736,6 +1752,59 @@ public partial class Plugin : BaseUnityPlugin
             Log.LogInfo($"[TestMode]   - {c.GetType().Name}");
         }
         Log.LogInfo($"[TestMode] Display Text:\n{itemInfoDisplayTextMesh.text}");
+    }
+
+    private static void LogAllItemInfo()
+    {
+        if (allItemPrefabs.Count == 0)
+        {
+            Log.LogInfo("[TestMode] No items loaded");
+            return;
+        }
+
+        Log.LogInfo($"[TestMode] F4 logging {allItemPrefabs.Count} items...");
+        int successCount = 0;
+        int failCount = 0;
+        string originalText = itemInfoDisplayTextMesh.text;
+
+        foreach (var itemPrefab in allItemPrefabs)
+        {
+            if (itemPrefab == null)
+            {
+                failCount++;
+                continue;
+            }
+
+            try
+            {
+                LogItemInfoForTest(itemPrefab);
+                successCount++;
+            }
+            catch (Exception e)
+            {
+                failCount++;
+                Log.LogWarning($"[TestMode] Failed to log {itemPrefab.name}: {e.GetType().Name} {e.Message}");
+            }
+        }
+
+        itemInfoDisplayTextMesh.text = originalText;
+        Log.LogInfo($"[TestMode] F4 completed. Logged={successCount}, Failed={failCount}.");
+    }
+
+    private static void LogItemInfoForTest(Item item)
+    {
+        Log.LogInfo($"[TestMode] Current Item: {item.name}");
+        var components = item.GetComponents<Component>();
+        foreach (var c in components)
+        {
+            Log.LogInfo($"[TestMode]   - {c.GetType().Name}");
+        }
+
+        string previousText = itemInfoDisplayTextMesh.text;
+        ProcessItemGameObject(item);
+        string displayText = itemInfoDisplayTextMesh.text;
+        itemInfoDisplayTextMesh.text = previousText;
+        Log.LogInfo($"[TestMode] Display Text:\n{displayText}");
     }
 
     private static void AddDisplayObject()
