@@ -194,7 +194,12 @@ public partial class Plugin : BaseUnityPlugin
     private static void ProcessItemGameObject(Item item)
     {
         GameObject itemGameObj = item.gameObject;
-        Component[] itemComponents = itemGameObj.GetComponents(typeof(Component)).GroupBy(c => c.GetType()).Select(g => g.First()).ToArray();
+        Component[] itemComponents = itemGameObj
+            .GetComponents(typeof(Component))
+            .Where(c => c != null)
+            .GroupBy(c => c.GetType())
+            .Select(g => g.First())
+            .ToArray();
         bool isConsumable = false;
         string prefixStatus = "";
         string suffixWeight = "";
@@ -283,7 +288,7 @@ public partial class Plugin : BaseUnityPlugin
                 suffixAfflictions += $"{GetText("ApplyMassAffliction")}";
                 //suffixAfflictions += "<#CCCCCC>NEARBY PLAYERS WILL RECEIVE:</color>\n";
                 suffixAfflictions += ProcessAffliction(effect.affliction);
-                if (effect.extraAfflictions.Length > 0)
+                if (effect.extraAfflictions != null && effect.extraAfflictions.Length > 0)
                 {
                     for (int j = 0; j < effect.extraAfflictions.Length; j++)
                     {
@@ -329,8 +334,7 @@ public partial class Plugin : BaseUnityPlugin
             }
             else if (itemComponents[i].GetType() == typeof(Action_ReduceUses))
             {
-                OptionableIntItemData uses = (OptionableIntItemData)item.data.data[DataEntryKey.ItemUses];
-                if (uses.HasData)
+                if (item?.data?.data != null && item.data.data.TryGetValue(DataEntryKey.ItemUses, out object usesData) && usesData is OptionableIntItemData uses && uses.HasData)
                 {
                     if (uses.Value > 1)
                     {
@@ -366,14 +370,17 @@ public partial class Plugin : BaseUnityPlugin
                 isConsumable = true;
                 suffixAfflictions += $"{GetText("RaycastDart")}";
                 //suffixAfflictions += "<#CCCCCC>SHOOT A DART THAT WILL APPLY:</color>\n";
-                for (int j = 0; j < effect.afflictionsOnHit.Length; j++)
+                if (effect.afflictionsOnHit != null)
                 {
-                    suffixAfflictions += ProcessAffliction(effect.afflictionsOnHit[j]);
-                    if (suffixAfflictions.EndsWith('\n'))
+                    for (int j = 0; j < effect.afflictionsOnHit.Length; j++)
                     {
-                        suffixAfflictions = suffixAfflictions.Remove(suffixAfflictions.Length - 1);
+                        suffixAfflictions += ProcessAffliction(effect.afflictionsOnHit[j]);
+                        if (suffixAfflictions.EndsWith('\n'))
+                        {
+                            suffixAfflictions = suffixAfflictions.Remove(suffixAfflictions.Length - 1);
+                        }
+                        suffixAfflictions += ",\n";
                     }
-                    suffixAfflictions += ",\n";
                 }
                 if (suffixAfflictions.EndsWith('\n'))
                 {
@@ -409,9 +416,17 @@ public partial class Plugin : BaseUnityPlugin
             else if (itemComponents[i].GetType() == typeof(Constructable))
             {
                 Constructable effect = (Constructable)itemComponents[i];
-                if (effect.constructedPrefab.name.Equals("PortableStovetop_Placed"))
+                if (effect.constructedPrefab != null && effect.constructedPrefab.name.Equals("PortableStovetop_Placed"))
                 {
-                    itemInfoDisplayTextMesh.text += $"{GetText("Constructable_PortableStovetop_Placed", effectColors["Injury"], effect.constructedPrefab.GetComponent<Campfire>().burnsFor.ToString())}";
+                    Campfire campfire = effect.constructedPrefab.GetComponent<Campfire>();
+                    if (campfire != null)
+                    {
+                        itemInfoDisplayTextMesh.text += $"{GetText("Constructable_PortableStovetop_Placed", effectColors["Injury"], campfire.burnsFor.ToString())}";
+                    }
+                    else
+                    {
+                        itemInfoDisplayTextMesh.text += $"{GetText("Constructable")}";
+                    }
                     //itemInfoDisplayTextMesh.text += "PLACE A " + effectColors["Injury"] + "COOKING</color> STOVE FOR " + effect.constructedPrefab.GetComponent<Campfire>().burnsFor.ToString() + "s\n";
                 }
                 else
@@ -445,7 +460,7 @@ public partial class Plugin : BaseUnityPlugin
             else if (itemComponents[i].GetType() == typeof(RopeShooter))
             {
                 RopeShooter effect = (RopeShooter)itemComponents[i];
-                if (effect.ropeAnchorWithRopePref.name.Equals("RopeAnchorForRopeShooterAnti"))
+                if (effect.ropeAnchorWithRopePref != null && effect.ropeAnchorWithRopePref.name.Equals("RopeAnchorForRopeShooterAnti"))
                 {
                     itemInfoDisplayTextMesh.text += GetText("RopeShooter_Anti", (effect.maxLength / 4f).ToString("F1").Replace(".0", ""));
                     //itemInfoDisplayTextMesh.text += "SHOOT A ROPE ANCHOR WHICH PLACES\nA ROPE THAT ";
@@ -631,11 +646,15 @@ public partial class Plugin : BaseUnityPlugin
             else if (itemComponents[i].GetType() == typeof(Action_Spawn))
             {
                 Action_Spawn effect = (Action_Spawn)itemComponents[i];
-                if (effect.objectToSpawn.name.Equals("VFX_Sunscreen"))
+                if (effect.objectToSpawn != null && effect.objectToSpawn.name.Equals("VFX_Sunscreen"))
                 {
-                    AOE effectAOE = effect.objectToSpawn.transform.Find("AOE").GetComponent<AOE>();
-                    RemoveAfterSeconds effectTime = effect.objectToSpawn.transform.Find("AOE").GetComponent<RemoveAfterSeconds>();
-                    itemInfoDisplayTextMesh.text += $"{GetText("VFX_Sunscreen", effectTime.seconds.ToString("F1").Replace(".0", ""), ProcessAffliction(effectAOE.affliction))}";
+                    Transform aoeTransform = effect.objectToSpawn.transform.Find("AOE");
+                    AOE effectAOE = aoeTransform != null ? aoeTransform.GetComponent<AOE>() : null;
+                    RemoveAfterSeconds effectTime = aoeTransform != null ? aoeTransform.GetComponent<RemoveAfterSeconds>() : null;
+                    if (effectAOE != null && effectTime != null)
+                    {
+                        itemInfoDisplayTextMesh.text += $"{GetText("VFX_Sunscreen", effectTime.seconds.ToString("F1").Replace(".0", ""), ProcessAffliction(effectAOE.affliction))}";
+                    }
                     //itemInfoDisplayTextMesh.text += "<#CCCCCC>SPRAY A " + effectTime.seconds.ToString("F1").Replace(".0", "") + "s MIST THAT APPLIES:</color>\n"
                     //    + ProcessAffliction(effectAOE.affliction);
                 }
@@ -690,7 +709,28 @@ public partial class Plugin : BaseUnityPlugin
             else if (itemComponents[i].GetType() == typeof(ItemCooking))
             {
                 ItemCooking itemCooking = (ItemCooking)itemComponents[i];
-                if (itemCooking.wreckWhenCooked && (itemCooking.timesCookedLocal >= 1))
+                bool hasCookingExplosion = false;
+                if (itemCooking.additionalCookingBehaviors != null)
+                {
+                    foreach (var behavior in itemCooking.additionalCookingBehaviors)
+                    {
+                        if (behavior is CookingBehavior_Explode)
+                        {
+                            hasCookingExplosion = true;
+                            break;
+                        }
+                    }
+                }
+                if (!hasCookingExplosion && itemCooking.explosionPrefab != null)
+                {
+                    hasCookingExplosion = true;
+                }
+
+                if (!itemCooking.canBeCooked)
+                {
+                    suffixCooked += $"{GetText("COOK_DISABLED", effectColors["Curse"])}";
+                }
+                else if (itemCooking.wreckWhenCooked && (itemCooking.timesCookedLocal >= 1))
                 {
 
                     suffixCooked += $"{GetText("COOKED_BROKEN", effectColors["Curse"])}";
@@ -731,6 +771,10 @@ public partial class Plugin : BaseUnityPlugin
                     suffixCooked += $"{GetText("COOKED", effectColors["Poison"], itemCooking.timesCookedLocal.ToString(), "")}";
 
                     //suffixCooked += "   " + effectColors["Poison"] + itemCooking.timesCookedLocal.ToString() + "x COOKED\nCAN BE COOKED</color>";
+                }
+                if (itemCooking.canBeCooked && hasCookingExplosion)
+                {
+                    suffixCooked += $"{GetText("COOK_EXPLODE", effectColors["Injury"])}";
                 }
             }
         }
@@ -1727,7 +1771,7 @@ public partial class Plugin : BaseUnityPlugin
 
             // 输出组件信息
             var components = spawnedObj.GetComponents<Component>();
-            var componentNames = components.Select(c => c.GetType().Name).ToList();
+            var componentNames = components.Select(c => c == null ? "<Missing Script>" : c.GetType().Name).ToList();
             Log.LogInfo($"[TestMode] Components: {string.Join(", ", componentNames)}");
         }
         catch (Exception e)
@@ -1749,7 +1793,7 @@ public partial class Plugin : BaseUnityPlugin
         var components = currentItem.GetComponents<Component>();
         foreach (var c in components)
         {
-            Log.LogInfo($"[TestMode]   - {c.GetType().Name}");
+            Log.LogInfo($"[TestMode]   - {(c == null ? "<Missing Script>" : c.GetType().Name)}");
         }
         Log.LogInfo($"[TestMode] Display Text:\n{itemInfoDisplayTextMesh.text}");
     }
@@ -1793,18 +1837,45 @@ public partial class Plugin : BaseUnityPlugin
 
     private static void LogItemInfoForTest(Item item)
     {
-        Log.LogInfo($"[TestMode] Current Item: {item.name}");
-        var components = item.GetComponents<Component>();
-        foreach (var c in components)
-        {
-            Log.LogInfo($"[TestMode]   - {c.GetType().Name}");
-        }
-
+        Item itemForLog = item;
+        GameObject tempObj = null;
         string previousText = itemInfoDisplayTextMesh.text;
-        ProcessItemGameObject(item);
-        string displayText = itemInfoDisplayTextMesh.text;
-        itemInfoDisplayTextMesh.text = previousText;
-        Log.LogInfo($"[TestMode] Display Text:\n{displayText}");
+
+        try
+        {
+            try
+            {
+                tempObj = UnityEngine.Object.Instantiate(item.gameObject);
+                Item tempItem = tempObj.GetComponent<Item>();
+                if (tempItem != null)
+                {
+                    itemForLog = tempItem;
+                }
+            }
+            catch (Exception e)
+            {
+                Log.LogWarning($"[TestMode] Clone failed for {item.name}: {e.GetType().Name} {e.Message}");
+            }
+
+            Log.LogInfo($"[TestMode] Current Item: {itemForLog.name}");
+            var components = itemForLog.GetComponents<Component>();
+            foreach (var c in components)
+            {
+                Log.LogInfo($"[TestMode]   - {(c == null ? "<Missing Script>" : c.GetType().Name)}");
+            }
+
+            ProcessItemGameObject(itemForLog);
+            string displayText = itemInfoDisplayTextMesh.text;
+            Log.LogInfo($"[TestMode] Display Text:\n{displayText}");
+        }
+        finally
+        {
+            itemInfoDisplayTextMesh.text = previousText;
+            if (tempObj != null)
+            {
+                UnityEngine.Object.Destroy(tempObj);
+            }
+        }
     }
 
     private static void AddDisplayObject()
@@ -1845,7 +1916,8 @@ public partial class Plugin : BaseUnityPlugin
                 var values = item.Value;
                 string firstValue = values[0];
                 values = values.Select(x => string.IsNullOrEmpty(x) ? firstValue : x).ToList();
-                LocalizedText.MAIN_TABLE.Add($"Mod_{Name}_{item.Key}".ToUpper(), values);
+                string localizedKey = $"Mod_{Name}_{item.Key}".ToUpper();
+                LocalizedText.MAIN_TABLE[localizedKey] = values;
             }
         }
         else
