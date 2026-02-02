@@ -26,6 +26,12 @@
     </EmbeddedResource>
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="ItemNameKeyMap.json">
+      <LogicalName>ItemNameKeyMap.json</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
   <!--
   How to include thunderstore mods as dependencies via nuget
 

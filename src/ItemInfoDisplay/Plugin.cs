@@ -7,6 +7,7 @@ using HarmonyLib;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.IO;
 using System.Reflection;
 
 using TMPro;
@@ -48,6 +49,8 @@ public partial class Plugin : BaseUnityPlugin
     private static HashSet<string> missingEffectColors = new HashSet<string>();
     private static int lastLanternItemId = 0;
     private static int lastLanternRemainingSeconds = -1;
+    private static Dictionary<string, string> itemNameKeyMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    private static bool itemNameKeyMapInitialized = false;
 
     private void Awake()
     {
@@ -334,7 +337,7 @@ public partial class Plugin : BaseUnityPlugin
             }
             else if (itemComponents[i].GetType() == typeof(Action_ReduceUses))
             {
-                if (item?.data?.data != null && item.data.data.TryGetValue(DataEntryKey.ItemUses, out object usesData) && usesData is OptionableIntItemData uses && uses.HasData)
+                if (item?.data?.data != null && item.data.data.TryGetValue(DataEntryKey.ItemUses, out DataEntryValue usesData) && usesData is OptionableIntItemData uses && uses.HasData)
                 {
                     if (uses.Value > 1)
                     {
@@ -748,31 +751,40 @@ public partial class Plugin : BaseUnityPlugin
                 }
                 else if (itemCooking.timesCookedLocal == 0)
                 {
-                    suffixCooked += $"\n{GetText("COOK", effectColors["Extra Stamina"])}</color>";//CAN BE COOKED
+                    if (itemCooking.canBeCooked && hasCookingExplosion)
+                    {
+                        suffixCooked += $"{GetText("COOK_EXPLODE", effectColors["Injury"])}";
+                    }
+                    else
+                    {
+                        suffixCooked += $"\n{GetText("COOK", effectColors["Extra Stamina"])}</color>";//CAN BE COOKED
+                    }
                 }
-                else if (itemCooking.timesCookedLocal == 1)
+                else if (itemCooking.timesCookedLocal <= 2)
                 {
-                    suffixCooked += $"{GetText("COOKED", effectColors["Extra Stamina"], itemCooking.timesCookedLocal.ToString(), effectColors["Hunger"])}";
+                    suffixCooked += $"{GetText("COOKED", effectColors["Extra Stamina"], itemCooking.timesCookedLocal.ToString())}";
+                    suffixCooked += $"{GetText("COOKED_BUFF", effectColors["Extra Stamina"])}";
                     //suffixCooked += "   " + effectColors["Extra Stamina"] + itemCooking.timesCookedLocal.ToString() + "x COOKED</color>\n" + effectColors["Hunger"] + "CAN BE COOKED</color>";
-                }
-                else if (itemCooking.timesCookedLocal == 2)
-                {
-                    suffixCooked += $"{GetText("COOKED", effectColors["Hunger"], itemCooking.timesCookedLocal.ToString(), effectColors["Injury"])}";
-                    //suffixCooked += "   " + effectColors["Hunger"] + itemCooking.timesCookedLocal.ToString() + "x COOKED</color>\n" + effectColors["Injury"] + "CAN BE COOKED</color>";
                 }
                 else if (itemCooking.timesCookedLocal == 3)
                 {
-                    suffixCooked += $"{GetText("COOKED", effectColors["Injury"], itemCooking.timesCookedLocal.ToString(), effectColors["Poison"])}";
+                    suffixCooked += $"{GetText("COOKED", effectColors["Injury"], itemCooking.timesCookedLocal.ToString())}";
+                    suffixCooked += $"{GetText("COOKED_NERF", effectColors["Injury"])}";
 
                     //suffixCooked += "   " + effectColors["Injury"] + itemCooking.timesCookedLocal.ToString() + "x COOKED</color>\n" + effectColors["Poison"] + "CAN BE COOKED</color>";
                 }
                 else if (itemCooking.timesCookedLocal >= 4)
                 {
-                    suffixCooked += $"{GetText("COOKED", effectColors["Poison"], itemCooking.timesCookedLocal.ToString(), "")}";
+                    suffixCooked += $"{GetText("COOKED", effectColors["Poison"], itemCooking.timesCookedLocal.ToString())}";
+                    suffixCooked += $"{GetText("COOKED_POISON", effectColors["Poison"])}";
 
                     //suffixCooked += "   " + effectColors["Poison"] + itemCooking.timesCookedLocal.ToString() + "x COOKED\nCAN BE COOKED</color>";
                 }
-                if (itemCooking.canBeCooked && hasCookingExplosion)
+                if (itemCooking.canBeCooked
+                    && hasCookingExplosion
+                    && itemCooking.timesCookedLocal > 0
+                    && itemCooking.timesCookedLocal < ItemCooking.COOKING_MAX
+                    && !itemCooking.wreckWhenCooked)
                 {
                     suffixCooked += $"{GetText("COOK_EXPLODE", effectColors["Injury"])}";
                 }
@@ -1733,6 +1745,7 @@ public partial class Plugin : BaseUnityPlugin
             .Where(i => i != null)
             .OrderBy(i => i.name)
             .ToList();
+        EnsureItemNameKeyMap();
         Log.LogInfo($"[TestMode] Loaded {allItemPrefabs.Count} items from ItemDatabase. Press F1/F2 to cycle, F3 to log current item info, F4 to log all items.");
         return allItemPrefabs.Count > 0;
     }
@@ -1789,7 +1802,9 @@ public partial class Plugin : BaseUnityPlugin
             return;
         }
 
-        Log.LogInfo($"[TestMode] Current Item: {currentItem.name}");
+        string localizedName = GetLocalizedItemName(currentItem);
+        string nameSuffix = string.IsNullOrEmpty(localizedName) ? "" : $" ({localizedName})";
+        Log.LogInfo($"[TestMode] Current Item: {currentItem.name}{nameSuffix}");
         var components = currentItem.GetComponents<Component>();
         foreach (var c in components)
         {
@@ -1857,7 +1872,9 @@ public partial class Plugin : BaseUnityPlugin
                 Log.LogWarning($"[TestMode] Clone failed for {item.name}: {e.GetType().Name} {e.Message}");
             }
 
-            Log.LogInfo($"[TestMode] Current Item: {itemForLog.name}");
+            string localizedName = GetLocalizedItemName(itemForLog);
+            string nameSuffix = string.IsNullOrEmpty(localizedName) ? "" : $" ({localizedName})";
+            Log.LogInfo($"[TestMode] Current Item: {itemForLog.name}{nameSuffix}");
             var components = itemForLog.GetComponents<Component>();
             foreach (var c in components)
             {
@@ -1899,6 +1916,162 @@ public partial class Plugin : BaseUnityPlugin
         itemInfoDisplayTextMesh.outlineWidth = configOutlineWidth.Value;
 
         LoadLocalizedText();
+    }
+
+    private static string GetLocalizedItemName(Item item)
+    {
+        if (item == null)
+        {
+            return string.Empty;
+        }
+
+        EnsureItemNameKeyMap();
+
+        string rawName = item.name ?? string.Empty;
+        if (ContainsNonAscii(rawName))
+        {
+            return rawName.Trim();
+        }
+
+        string normalizedName = NormalizeItemNameForMap(rawName);
+        if (!string.IsNullOrEmpty(normalizedName) && itemNameKeyMap.TryGetValue(normalizedName, out string mappedKey))
+        {
+            return ResolveLocalizedText(mappedKey);
+        }
+
+        return string.Empty;
+    }
+
+    private static void EnsureItemNameKeyMap()
+    {
+        if (itemNameKeyMapInitialized)
+        {
+            return;
+        }
+
+        LoadItemNameKeyMap();
+        itemNameKeyMapInitialized = true;
+    }
+
+    private static void LoadItemNameKeyMap()
+    {
+        itemNameKeyMap.Clear();
+
+        try
+        {
+            using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("ItemNameKeyMap.json");
+            if (stream == null)
+            {
+                Log.LogWarning("[TestMode] Embedded ItemNameKeyMap.json not found.");
+                return;
+            }
+
+            using var reader = new StreamReader(stream);
+            string json = reader.ReadToEnd();
+            var data = Newtonsoft.Json.JsonConvert.DeserializeObject<Dictionary<string, string>>(json);
+            if (data == null)
+            {
+                return;
+            }
+
+            foreach (var kvp in data)
+            {
+                if (!string.IsNullOrWhiteSpace(kvp.Key) && !string.IsNullOrWhiteSpace(kvp.Value))
+                {
+                    itemNameKeyMap[kvp.Key] = kvp.Value;
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            Log.LogWarning($"[TestMode] Failed to load embedded ItemNameKeyMap.json: {e.GetType().Name} {e.Message}");
+        }
+    }
+
+    private static string NormalizeItemNameForMap(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return string.Empty;
+        }
+
+        string normalized = StripLocPrefix(name.Trim());
+        normalized = normalized.Replace("(Clone)", "").Trim();
+        return normalized;
+    }
+
+    private static bool ContainsNonAscii(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (text[i] > 127)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string StripLocPrefix(string key)
+    {
+        if (string.IsNullOrEmpty(key))
+        {
+            return string.Empty;
+        }
+
+        const string prefix = "LOC:";
+        if (key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return key.Substring(prefix.Length).Trim();
+        }
+
+        return key;
+    }
+
+    private static string ResolveLocalizedText(string key)
+    {
+        if (string.IsNullOrEmpty(key))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            string normalizedKey = StripLocPrefix(key.Trim());
+            if (string.IsNullOrEmpty(normalizedKey))
+            {
+                return string.Empty;
+            }
+
+            string localized = LocalizedText.GetText(normalizedKey);
+            if (string.IsNullOrEmpty(localized))
+            {
+                return string.Empty;
+            }
+
+            string normalizedLocalized = localized.Trim();
+            if (normalizedLocalized.StartsWith("LOC:", StringComparison.OrdinalIgnoreCase))
+            {
+                return string.Empty;
+            }
+
+            if (string.Equals(normalizedLocalized, normalizedKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return string.Empty;
+            }
+
+            return normalizedLocalized;
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     private static string GetText(string key, params string[] args)
