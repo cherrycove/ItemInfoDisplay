@@ -9,8 +9,8 @@
     "", //Português (BR)
     "", //Русский
     "", //Українська
-    "\n可以烹饪", //简体中文
-    "\n可以烹饪", //繁體中文
+    "可以烹饪", //简体中文
+    "可以烹饪", //繁體中文
     "", //日本語
     "", //한국어
     "", //Polski
@@ -36,7 +36,7 @@
     null
   ],
   "COOKED_BUFF": [
-    "\n{0}EFFECTS INCREASE</color>",
+    " | {0}EFFECTS INCREASE</color>",
     "",
     "",
     "",
@@ -45,8 +45,8 @@
     "",
     "",
     "",
-    "\n{0}效果提升</color>",
-    "\n{0}效果提升</color>",
+    " | {0}效果提升</color>",
+    " | {0}效果提升</color>",
     "",
     "",
     "",
@@ -54,7 +54,7 @@
     null
   ],
   "COOKED_NERF": [
-    "\n{0}EFFECTS DECREASE</color>",
+    " | {0}EFFECTS DECREASE</color>",
     "",
     "",
     "",
@@ -63,8 +63,8 @@
     "",
     "",
     "",
-    "\n{0}效果降低</color>",
-    "\n{0}效果降低</color>",
+    " | {0}效果降低</color>",
+    " | {0}效果降低</color>",
     "",
     "",
     "",
@@ -72,7 +72,7 @@
     null
   ],
   "COOKED_POISON": [
-    "\n{0}POISON INCREASES</color>",
+    " | {0}POISON INCREASES</color>",
     "",
     "",
     "",
@@ -81,8 +81,8 @@
     "",
     "",
     "",
-    "\n{0}中毒增加</color>",
-    "\n{0}中毒增加</color>",
+    " | {0}中毒增加</color>",
+    " | {0}中毒增加</color>",
     "",
     "",
     "",
@@ -90,7 +90,7 @@
     null
   ],
   "COOKED_MAX": [
-    "{0}{1}x COOKED</color>\\nCANNOT BE COOKED</color>",
+    "{0}{1}x COOKED</color> | CANNOT BE COOKED</color>",
     "",
     "",
     "",
@@ -99,8 +99,8 @@
     "",
     "",
     "",
-    "   烹饪 {0}{1}</color> 次\n\n继续烹饪没有任何效果了</color>",
-    "   烹饪 {0}{1}</color> 次\n\n继续烹饪没有任何效果了</color>",
+    "   烹饪 {0}{1}</color> 次 | 继续烹饪没有任何效果了</color>",
+    "   烹饪 {0}{1}</color> 次 | 继续烹饪没有任何效果了</color>",
     "",
     "",
     "",
@@ -108,7 +108,7 @@
     null
   ],
   "COOK_BROKEN": [
-    "\n{0}BREAKS IF COOKED</color>",
+    " | {0}BREAKS IF COOKED</color>",
     "",
     "",
     "",
@@ -117,8 +117,8 @@
     "",
     "",
     "",
-    "\n\n{0}烹饪会将其烧毁",
-    "\n\n{0}烹饪会将其烧毁",
+    " | {0}烹饪会将其烧毁",
+    " | {0}烹饪会将其烧毁",
     "",
     "",
     "",
@@ -126,7 +126,7 @@
     null
   ],
   "COOKED_BROKEN": [
-    "\n{0}BROKEN FROM COOKING</color>",
+    " | {0}BROKEN FROM COOKING</color>",
     "",
     "",
     "",
@@ -135,8 +135,8 @@
     "",
     "",
     "",
-    "\n\n{0}被烧毁了",
-    "\n\n{0}被烧毁了",
+    " | {0}被烧毁了",
+    " | {0}被烧毁了",
     "",
     "",
     "",
@@ -144,7 +144,7 @@
     null
   ],
   "COOK_DISABLED": [
-    "\n{0}CANNOT BE COOKED</color>",
+    " | {0}CANNOT BE COOKED</color>",
     "",
     "",
     "",
@@ -153,8 +153,8 @@
     "",
     "",
     "",
-    "\n\n{0}无法烹饪</color>",
-    "\n\n{0}無法烹飪</color>",
+    " | {0}无法烹饪</color>",
+    " | {0}無法烹飪</color>",
     "",
     "",
     "",
@@ -162,7 +162,7 @@
     null
   ],
   "COOK_EXPLODE": [
-    "\n{0}EXPLODES WHEN COOKED</color>",
+    " | {0}EXPLODES WHEN COOKED</color>",
     "",
     "",
     "",
@@ -171,8 +171,116 @@
     "",
     "",
     "",
-    "\n\n{0}烹饪会爆炸</color>",
-    "\n\n{0}烹飪會爆炸</color>",
+    " | {0}烹饪会爆炸</color>",
+    " | {0}烹飪會爆炸</color>",
+    "",
+    "",
+    "",
+    "",
+    null
+  ],
+  "COOK_ON_COOK": [
+    " | <#CCCCCC>ON COOK:</color> ",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " | <#CCCCCC>烹饪时：</color> ",
+    " | <#CCCCCC>烹飪時：</color> ",
+    "",
+    "",
+    "",
+    "",
+    null
+  ],
+  "COOK_USE_EXPLODE": [
+    " | {0}EXPLODES WHEN USED AFTER COOKING</color>",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " | {0}烹饪后使用会爆炸</color>",
+    " | {0}烹飪後使用會爆炸</color>",
+    "",
+    "",
+    "",
+    "",
+    null
+  ],
+  "COOK_NEXT_BUFF": [
+    " | {0}NEXT COOK: EFFECTS INCREASE</color>",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " | {0}下次烹饪：效果提升</color>",
+    " | {0}下次烹飪：效果提升</color>",
+    "",
+    "",
+    "",
+    "",
+    null
+  ],
+  "COOK_NEXT_NERF": [
+    " | {0}NEXT COOK: EFFECTS DECREASE</color>",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " | {0}下次烹饪：效果降低</color>",
+    " | {0}下次烹飪：效果降低</color>",
+    "",
+    "",
+    "",
+    "",
+    null
+  ],
+  "COOK_NEXT_POISON": [
+    " | {0}NEXT COOK: POISON INCREASES</color>",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " | {0}下次烹饪：中毒增加</color>",
+    " | {0}下次烹飪：中毒增加</color>",
+    "",
+    "",
+    "",
+    "",
+    null
+  ],
+  "COOK_NEXT_NONE": [
+    " | {0}NEXT COOK: NO EFFECT</color>",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " | {0}下次烹饪：没有效果</color>",
+    " | {0}下次烹飪：沒有效果</color>",
     "",
     "",
     "",
