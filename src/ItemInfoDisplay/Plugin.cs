@@ -201,9 +201,18 @@ public partial class Plugin : BaseUnityPlugin
     private static void ProcessItemGameObject(Item item)
     {
         GameObject itemGameObj = item.gameObject;
-        Component[] itemComponents = itemGameObj
+        Component[] allComponents = itemGameObj
             .GetComponents(typeof(Component))
             .Where(c => c != null)
+            .ToArray();
+        Component[] activeComponents = allComponents
+            .Where(IsComponentActiveForDisplay)
+            .ToArray();
+        Action_ModifyStatus[] modifyStatusComponents = activeComponents
+            .OfType<Action_ModifyStatus>()
+            .ToArray();
+        Component[] itemComponents = activeComponents
+            .Where(c => c.GetType() != typeof(Action_ModifyStatus))
             .GroupBy(c => c.GetType())
             .Select(g => g.First())
             .ToArray();
@@ -222,7 +231,7 @@ public partial class Plugin : BaseUnityPlugin
         bool hasCookingExplosion = false;
         bool hasCookingWreck = false;
         bool hasCookUseExplosion = false;
-        List<(string statusType, float amount)> cookingStatusAdjustments = new List<(string statusType, float amount)>();
+        List<AdditionalCookingBehavior> cookingBehaviors = new List<AdditionalCookingBehavior>();
 
         if (itemCooking != null && itemCooking.additionalCookingBehaviors != null)
         {
@@ -233,6 +242,8 @@ public partial class Plugin : BaseUnityPlugin
                     continue;
                 }
 
+                cookingBehaviors.Add(behavior);
+
                 if (behavior is CookingBehavior_Explode)
                 {
                     hasCookingExplosion = true;
@@ -241,14 +252,6 @@ public partial class Plugin : BaseUnityPlugin
                 if (behavior is CookingBehavior_Wreck)
                 {
                     hasCookingWreck = true;
-                    continue;
-                }
-                if (behavior is CookingBehavior_AdjustStatusInstantly adjustStatus)
-                {
-                    if (adjustStatus.statusType != default || adjustStatus.amount != 0f)
-                    {
-                        cookingStatusAdjustments.Add((adjustStatus.statusType.ToString(), adjustStatus.amount));
-                    }
                     continue;
                 }
                 if (behavior is CookingBehavior_EnableScripts enableScripts)
@@ -380,12 +383,6 @@ public partial class Plugin : BaseUnityPlugin
                 Action_AddOrRemoveThorns effect = (Action_AddOrRemoveThorns)itemComponents[i];
                 float thornsAmount = ApplyCookingMultiplier((effect.thornCount * 0.05f), cookingMultiplier);
                 prefixStatus += ProcessEffect(thornsAmount, "Thorns"); // TODO: Search for thorns amount per applied thorn
-            }
-            else if (itemComponents[i].GetType() == typeof(Action_ModifyStatus))
-            {
-                Action_ModifyStatus effect = (Action_ModifyStatus)itemComponents[i];
-                float changeAmount = ApplyCookingMultiplier(effect.changeAmount, cookingMultiplier);
-                prefixStatus += ProcessEffect(changeAmount, effect.statusType.ToString());
             }
             else if (itemComponents[i].GetType() == typeof(Action_RandomMushroomEffect))
             {
@@ -821,7 +818,7 @@ public partial class Plugin : BaseUnityPlugin
             {
                 itemCooking = (ItemCooking)itemComponents[i];
                 bool breaksWhenCooked = itemCooking.wreckWhenCooked || hasCookingWreck;
-                bool showCookEffectHints = !hasCookingExplosion;
+                List<string> nextCookLines = BuildNextCookDeltaLines(itemCooking, cookingBehaviors, hasCookUseExplosion, breaksWhenCooked, cookingMultiplier);
 
                 if (!itemCooking.canBeCooked)
                 {
@@ -839,96 +836,65 @@ public partial class Plugin : BaseUnityPlugin
                 }
                 else if (itemCooking.timesCookedLocal == 0)
                 {
-                    suffixCooked += $"\n{GetText("COOK", effectColors["Extra Stamina"])}</color>";//CAN BE COOKED
-                    if (breaksWhenCooked)
+                    if (!hasCookingExplosion)
                     {
-                        suffixCooked += $"{GetText("COOK_BROKEN", effectColors["Curse"])}";
-                    }
-                    else if (hasCookingExplosion)
-                    {
-                        suffixCooked += $"{GetText("COOK_EXPLODE", effectColors["Injury"])}";
-                    }
-                    else if (hasCookUseExplosion)
-                    {
-                        suffixCooked += $"{GetText("COOK_USE_EXPLODE", effectColors["Injury"])}";
+                        suffixCooked += $"\n{GetText("COOK", effectColors["Extra Stamina"])}</color>";//CAN BE COOKED
                     }
                     else
                     {
-                        suffixCooked += $"{GetNextCookHint(itemCooking.timesCookedLocal + 1)}";
-                    }
-
-                    if (cookingStatusAdjustments.Count > 0)
-                    {
-                        suffixCooked += $"{GetText("COOK_ON_COOK")}";
-                        bool wroteEffect = false;
-                        foreach (var adjustment in cookingStatusAdjustments)
-                        {
-                            string effectText = ProcessEffectInline(adjustment.amount, adjustment.statusType);
-                            if (string.IsNullOrEmpty(effectText))
-                            {
-                                continue;
-                            }
-                            if (wroteEffect)
-                            {
-                                suffixCooked += " ";
-                            }
-                            suffixCooked += effectText;
-                            wroteEffect = true;
-                        }
+                        suffixCooked += "\n";
                     }
                 }
                 else if (itemCooking.timesCookedLocal <= 2)
                 {
                     suffixCooked += $"{GetText("COOKED", effectColors["Extra Stamina"], itemCooking.timesCookedLocal.ToString())}";
-                    if (showCookEffectHints)
-                    {
-                        suffixCooked += $"{GetText("COOKED_BUFF", effectColors["Extra Stamina"])}";
-                    }
                     //suffixCooked += "   " + effectColors["Extra Stamina"] + itemCooking.timesCookedLocal.ToString() + "x COOKED</color>\n" + effectColors["Hunger"] + "CAN BE COOKED</color>";
                 }
                 else if (itemCooking.timesCookedLocal == 3)
                 {
                     suffixCooked += $"{GetText("COOKED", effectColors["Injury"], itemCooking.timesCookedLocal.ToString())}";
-                    if (showCookEffectHints)
-                    {
-                        suffixCooked += $"{GetText("COOKED_NERF", effectColors["Injury"])}";
-                    }
-
                     //suffixCooked += "   " + effectColors["Injury"] + itemCooking.timesCookedLocal.ToString() + "x COOKED</color>\n" + effectColors["Poison"] + "CAN BE COOKED</color>";
                 }
                 else if (itemCooking.timesCookedLocal >= 4)
                 {
                     suffixCooked += $"{GetText("COOKED", effectColors["Poison"], itemCooking.timesCookedLocal.ToString())}";
-                    if (showCookEffectHints)
-                    {
-                        suffixCooked += $"{GetText("COOKED_POISON", effectColors["Poison"])}";
-                    }
-
                     //suffixCooked += "   " + effectColors["Poison"] + itemCooking.timesCookedLocal.ToString() + "x COOKED\nCAN BE COOKED</color>";
                 }
 
                 if (itemCooking.canBeCooked
-                    && !breaksWhenCooked
-                    && showCookEffectHints
-                    && itemCooking.timesCookedLocal > 0
-                    && itemCooking.timesCookedLocal < ItemCooking.COOKING_MAX)
-                {
-                    suffixCooked += $"{GetNextCookHint(itemCooking.timesCookedLocal + 1)}";
-                }
-
-                if (itemCooking.canBeCooked
-                    && hasCookingExplosion
-                    && itemCooking.timesCookedLocal > 0
                     && itemCooking.timesCookedLocal < ItemCooking.COOKING_MAX
-                    && !breaksWhenCooked)
+                    && nextCookLines.Count > 0)
                 {
-                    suffixCooked += $"{GetText("COOK_EXPLODE", effectColors["Injury"])}";
+                    AppendCookDeltaLines(ref suffixCooked, nextCookLines);
+                }
+            }
+        }
+
+        if (modifyStatusComponents.Length > 0)
+        {
+            Dictionary<string, float> statusTotals = new Dictionary<string, float>();
+            foreach (Action_ModifyStatus effect in modifyStatusComponents)
+            {
+                if (effect == null)
+                {
+                    continue;
                 }
 
-                if (hasCookUseExplosion && itemCooking.timesCookedLocal > 0)
+                float changeAmount = ApplyCookingMultiplier(effect.changeAmount, cookingMultiplier);
+                string statusKey = effect.statusType.ToString();
+                if (statusTotals.TryGetValue(statusKey, out float existing))
                 {
-                    suffixCooked += $"{GetText("COOK_USE_EXPLODE", effectColors["Injury"])}";
+                    statusTotals[statusKey] = existing + changeAmount;
                 }
+                else
+                {
+                    statusTotals[statusKey] = changeAmount;
+                }
+            }
+
+            foreach (var kvp in statusTotals)
+            {
+                prefixStatus += ProcessEffect(kvp.Value, kvp.Key);
             }
         }
 
@@ -940,7 +906,15 @@ public partial class Plugin : BaseUnityPlugin
         {
             itemInfoDisplayTextMesh.text += "\n" + suffixAfflictions;
         }
-        string suffixBlock = suffixWeight + suffixUses + suffixCooked;
+        string suffixBlock = suffixWeight + suffixUses;
+        if (!string.IsNullOrEmpty(suffixCooked))
+        {
+            if (!string.IsNullOrEmpty(suffixBlock))
+            {
+                suffixBlock += "\n\n";
+            }
+            suffixBlock += suffixCooked;
+        }
         if (!string.IsNullOrEmpty(suffixBlock))
         {
             if (itemInfoDisplayTextMesh.text.Length > 0)
@@ -1756,9 +1730,13 @@ public partial class Plugin : BaseUnityPlugin
         {
             return GetText("COOK_NEXT_NONE", effectColors["Curse"]);
         }
-        if (nextTimesCooked <= 2)
+        if (nextTimesCooked == 1)
         {
             return GetText("COOK_NEXT_BUFF", effectColors["Extra Stamina"]);
+        }
+        if (nextTimesCooked == 2)
+        {
+            return GetText("COOK_NEXT_SAME", effectColors["ItemInfoDisplayPositive"]);
         }
         if (nextTimesCooked == 3)
         {
@@ -1766,6 +1744,579 @@ public partial class Plugin : BaseUnityPlugin
         }
 
         return GetText("COOK_NEXT_POISON", effectColors["Poison"]);
+    }
+
+    private static List<string> BuildNextCookDeltaLines(ItemCooking itemCooking, IReadOnlyList<AdditionalCookingBehavior> cookingBehaviors, bool hasCookUseExplosion, bool breaksWhenCooked, float cookingMultiplier)
+    {
+        List<string> lines = new List<string>();
+        if (itemCooking == null || !itemCooking.canBeCooked || itemCooking.timesCookedLocal >= ItemCooking.COOKING_MAX)
+        {
+            return lines;
+        }
+
+        int nextCooked = itemCooking.timesCookedLocal + 1;
+        bool willExplode = WillExplodeOnNextCook(itemCooking, cookingBehaviors, nextCooked);
+
+        List<string> deltaEffects = new List<string>();
+        if (!itemCooking.ignoreDefaultCookBehavior && !willExplode)
+        {
+            deltaEffects.AddRange(BuildDefaultNextCookDeltaEffects(itemCooking, nextCooked, cookingMultiplier));
+        }
+
+        List<string> onCookValueEffects = new List<string>();
+        List<string> onCookFullLines = new List<string>();
+        List<string> enableEffects = new List<string>();
+        List<string> disableEffects = new List<string>();
+
+        foreach (AdditionalCookingBehavior behavior in cookingBehaviors)
+        {
+            if (behavior == null)
+            {
+                continue;
+            }
+            if (!WillTriggerBehavior(behavior, itemCooking.timesCookedLocal, nextCooked))
+            {
+                continue;
+            }
+
+            if (behavior is CookingBehavior_Explode explode)
+            {
+                if (CanExplodeWhenCooked(explode, itemCooking))
+                {
+                    onCookFullLines.Add(TrimLeadingSeparator(GetText("COOK_EXPLODE", effectColors["Injury"])));
+                }
+                continue;
+            }
+            if (behavior is CookingBehavior_Wreck)
+            {
+                onCookFullLines.Add(TrimLeadingSeparator(GetText("COOK_BROKEN", effectColors["Curse"])));
+                continue;
+            }
+            if (behavior is CookingBehavior_AdjustStatusInstantly adjust)
+            {
+                float amount = ApplyCookingMultiplier(adjust.amount, cookingMultiplier);
+                AppendHint(onCookValueEffects, ProcessEffectInline(amount, adjust.statusType.ToString()));
+                continue;
+            }
+            if (behavior is CookingBehavior_ChangeAfflictionTime change)
+            {
+                onCookFullLines.Add(TrimLeadingSeparator(BuildAfflictionTimeChangeHint(change)));
+                continue;
+            }
+            if (behavior is CookingBehavior_RunActions runActions)
+            {
+                if (runActions.actionsToRun != null)
+                {
+                    foreach (ItemAction action in runActions.actionsToRun)
+                    {
+                        string effect = BuildActionEffectInline(action, cookingMultiplier);
+                        AppendHint(onCookValueEffects, effect);
+                    }
+                }
+                continue;
+            }
+            if (behavior is CookingBehavior_EnableScripts enableScripts)
+            {
+                AddScriptEffectHints(enableEffects, enableScripts.scriptsToEnable, cookingMultiplier);
+                continue;
+            }
+            if (behavior is CookingBehavior_MessUpAudio || behavior is CookingBehavior_ModifyAudioSourcePitch)
+            {
+                onCookFullLines.Add(TrimLeadingSeparator(GetText("COOK_AUDIO", effectColors["ItemInfoDisplayPositive"])));
+                continue;
+            }
+
+            if (IsDisableScriptsBehavior(behavior))
+            {
+                AddScriptEffectHints(disableEffects, GetBehaviorScripts(behavior), cookingMultiplier);
+                continue;
+            }
+            if (IsModifyBugleWobbleBehavior(behavior))
+            {
+                onCookFullLines.Add(TrimLeadingSeparator(GetText("COOK_BUGLE_WOBBLE", effectColors["ItemInfoDisplayPositive"])));
+                continue;
+            }
+        }
+
+        if (enableEffects.Count > 0)
+        {
+            onCookFullLines.Add($"{TrimLeadingSeparator(GetText("COOK_ENABLE"))}{string.Join(" ", enableEffects)}");
+        }
+        if (disableEffects.Count > 0)
+        {
+            onCookFullLines.Add($"{TrimLeadingSeparator(GetText("COOK_DISABLE"))}{string.Join(" ", disableEffects)}");
+        }
+        if (hasCookUseExplosion)
+        {
+            onCookFullLines.Add(TrimLeadingSeparator(GetText("COOK_USE_EXPLODE", effectColors["Injury"])));
+        }
+        if (breaksWhenCooked && onCookFullLines.Count == 0)
+        {
+            onCookFullLines.Add(TrimLeadingSeparator(GetText("COOK_BROKEN", effectColors["Curse"])));
+        }
+
+        if (deltaEffects.Count > 0)
+        {
+            string deltaPrefix = GetText("COOK_NEXT_DELTA");
+            foreach (string effect in deltaEffects)
+            {
+                if (string.IsNullOrWhiteSpace(effect))
+                {
+                    continue;
+                }
+                lines.Add($"{deltaPrefix}{effect}");
+            }
+        }
+
+        if (onCookValueEffects.Count > 0)
+        {
+            string onCookPrefix = TrimLeadingSeparator(GetText("COOK_ON_COOK"));
+            foreach (string effect in onCookValueEffects)
+            {
+                if (string.IsNullOrWhiteSpace(effect))
+                {
+                    continue;
+                }
+                lines.Add($"{onCookPrefix}{effect}");
+            }
+        }
+
+        if (onCookFullLines.Count > 0)
+        {
+            lines.AddRange(onCookFullLines.Where(line => !string.IsNullOrWhiteSpace(line)));
+        }
+
+        if (lines.Count == 0)
+        {
+            lines.Add(TrimLeadingSeparator(GetText("COOK_NEXT_NONE", effectColors["Curse"])));
+        }
+
+        return lines;
+    }
+
+    private static List<string> BuildDefaultNextCookDeltaEffects(ItemCooking itemCooking, int nextCooked, float cookingMultiplier)
+    {
+        List<string> effects = new List<string>();
+        if (itemCooking == null)
+        {
+            return effects;
+        }
+
+        Action_RestoreHunger restoreHunger = itemCooking.GetComponent<Action_RestoreHunger>();
+        if (restoreHunger != null && IsComponentActiveForDisplay(restoreHunger))
+        {
+            float current = restoreHunger.restorationAmount;
+            float nextValue = current;
+            if (nextCooked < 2)
+            {
+                nextValue = current * 2f;
+            }
+            else if (nextCooked > 2)
+            {
+                nextValue = Mathf.Max(current - 0.05f, 0f);
+            }
+
+            float delta = ApplyCookingMultiplier(nextValue - current, cookingMultiplier);
+            if (Mathf.Abs(delta) > 0.0001f)
+            {
+                effects.Add(ProcessEffectInline(delta * -1f, "Hunger"));
+            }
+        }
+
+        float currentStamina = 0f;
+        bool canShowStaminaDelta = true;
+        Action_GiveExtraStamina giveStamina = itemCooking.GetComponent<Action_GiveExtraStamina>();
+        if (giveStamina != null)
+        {
+            if (!IsComponentActiveForDisplay(giveStamina))
+            {
+                canShowStaminaDelta = false;
+            }
+            else
+            {
+                currentStamina = giveStamina.amount;
+            }
+        }
+
+        if (canShowStaminaDelta)
+        {
+            float nextStamina = currentStamina;
+            if (nextCooked < 2)
+            {
+                nextStamina = Mathf.Max(0.1f, currentStamina * 1.5f);
+            }
+            else if (nextCooked > 2)
+            {
+                nextStamina = 0f;
+            }
+
+            float deltaStamina = ApplyCookingMultiplier(nextStamina - currentStamina, cookingMultiplier);
+            if (Mathf.Abs(deltaStamina) > 0.0001f)
+            {
+                effects.Add(ProcessEffectInline(deltaStamina, "Extra Stamina"));
+            }
+        }
+
+        if (nextCooked > 3)
+        {
+            float deltaPoison = ApplyCookingMultiplier(0.1f, cookingMultiplier);
+            if (Mathf.Abs(deltaPoison) > 0.0001f)
+            {
+                effects.Add(ProcessEffectInline(deltaPoison, CharacterAfflictions.STATUSTYPE.Poison.ToString()));
+            }
+        }
+
+        return effects;
+    }
+
+    private static bool WillExplodeOnNextCook(ItemCooking itemCooking, IReadOnlyList<AdditionalCookingBehavior> cookingBehaviors, int nextCooked)
+    {
+        if (itemCooking == null)
+        {
+            return false;
+        }
+
+        foreach (AdditionalCookingBehavior behavior in cookingBehaviors)
+        {
+            if (behavior is not CookingBehavior_Explode explode)
+            {
+                continue;
+            }
+            if (!WillTriggerBehavior(behavior, itemCooking.timesCookedLocal, nextCooked))
+            {
+                continue;
+            }
+            if (CanExplodeWhenCooked(explode, itemCooking))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool WillTriggerBehavior(AdditionalCookingBehavior behavior, int currentCooked, int nextCooked)
+    {
+        if (behavior == null)
+        {
+            return false;
+        }
+        if (nextCooked < behavior.cookedAmountToTrigger)
+        {
+            return false;
+        }
+        if (behavior.onlyOnce && currentCooked >= behavior.cookedAmountToTrigger)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool CanExplodeWhenCooked(CookingBehavior_Explode explode, ItemCooking itemCooking)
+    {
+        if (explode == null || itemCooking == null)
+        {
+            return false;
+        }
+        if (!explode.dontRunIfOutOfFuel)
+        {
+            return true;
+        }
+
+        try
+        {
+            FloatItemData fuel = itemCooking.item.GetData<FloatItemData>(DataEntryKey.Fuel);
+            return fuel != null && fuel.Value > 0f;
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    private static bool IsDisableScriptsBehavior(AdditionalCookingBehavior behavior)
+    {
+        return behavior != null
+            && behavior.GetType().Name.IndexOf("DisableScripts", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static bool IsModifyBugleWobbleBehavior(AdditionalCookingBehavior behavior)
+    {
+        return behavior != null
+            && behavior.GetType().Name.IndexOf("ModifyBugleWobble", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static void AppendHint(List<string> target, string hint)
+    {
+        if (string.IsNullOrWhiteSpace(hint))
+        {
+            return;
+        }
+
+        if (!target.Contains(hint))
+        {
+            target.Add(hint);
+        }
+    }
+
+    private static bool IsComponentActiveForDisplay(Component component)
+    {
+        if (component == null)
+        {
+            return false;
+        }
+        if (component is ItemCooking)
+        {
+            return true;
+        }
+        if (component is Behaviour behaviour)
+        {
+            return behaviour.isActiveAndEnabled;
+        }
+        return true;
+    }
+
+    private static void AppendCookDeltaLines(ref string suffixCooked, IReadOnlyList<string> lines)
+    {
+        if (lines == null || lines.Count == 0)
+        {
+            return;
+        }
+
+        string combined = string.Join("\n", lines.Where(line => !string.IsNullOrWhiteSpace(line)));
+        if (string.IsNullOrWhiteSpace(combined))
+        {
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(suffixCooked))
+        {
+            if (suffixCooked.EndsWith("\n\n"))
+            {
+                // already has blank line
+            }
+            else if (suffixCooked.EndsWith("\n"))
+            {
+                suffixCooked += "\n";
+            }
+            else
+            {
+                suffixCooked += "\n\n";
+            }
+        }
+
+        suffixCooked += combined;
+    }
+
+    private static string TrimLeadingSeparator(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return string.Empty;
+        }
+
+        if (text.StartsWith(" | ", StringComparison.Ordinal))
+        {
+            return text.Substring(3);
+        }
+        if (text.StartsWith("| ", StringComparison.Ordinal))
+        {
+            return text.Substring(2);
+        }
+        if (text.StartsWith("|", StringComparison.Ordinal))
+        {
+            return text.Substring(1);
+        }
+
+        return text;
+    }
+
+    private static string BuildAfflictionTimeChangeHint(CookingBehavior_ChangeAfflictionTime change)
+    {
+        if (change == null)
+        {
+            return string.Empty;
+        }
+
+        string amountText = Mathf.Abs(change.change).ToString("F1").Replace(".0", "");
+        string sign = change.change >= 0f ? "+" : "-";
+        string afflictionName = "Affliction";
+        try
+        {
+            if (change.action != null && change.action.affliction != null)
+            {
+                afflictionName = change.action.affliction.GetAfflictionType().ToString();
+            }
+        }
+        catch
+        {
+            afflictionName = "Affliction";
+        }
+
+        return GetText("COOK_AFFLICTION_TIME", afflictionName, sign, amountText);
+    }
+
+    private static void AddScriptEffectHints(List<string> target, IEnumerable<MonoBehaviour> scripts, float cookingMultiplier)
+    {
+        if (scripts == null)
+        {
+            return;
+        }
+
+        foreach (MonoBehaviour script in scripts)
+        {
+            if (script == null)
+            {
+                continue;
+            }
+
+            if (script is ItemAction action)
+            {
+                AppendHint(target, BuildActionEffectInline(action, cookingMultiplier));
+                continue;
+            }
+
+            AppendHint(target, script.GetType().Name);
+        }
+    }
+
+    private static List<MonoBehaviour> GetBehaviorScripts(object behavior)
+    {
+        List<MonoBehaviour> scripts = new List<MonoBehaviour>();
+        if (behavior == null)
+        {
+            return scripts;
+        }
+
+        BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        Type type = behavior.GetType();
+        foreach (FieldInfo field in type.GetFields(flags))
+        {
+            if (!NameContainsActionOrScript(field.Name))
+            {
+                continue;
+            }
+            AddScriptsFromValue(scripts, field.GetValue(behavior));
+        }
+
+        foreach (PropertyInfo property in type.GetProperties(flags))
+        {
+            if (!property.CanRead || property.GetIndexParameters().Length > 0)
+            {
+                continue;
+            }
+            if (!NameContainsActionOrScript(property.Name))
+            {
+                continue;
+            }
+
+            object value = null;
+            try
+            {
+                value = property.GetValue(behavior, null);
+            }
+            catch
+            {
+                continue;
+            }
+
+            AddScriptsFromValue(scripts, value);
+        }
+
+        return scripts;
+    }
+
+    private static void AddScriptsFromValue(List<MonoBehaviour> scripts, object value)
+    {
+        if (value is MonoBehaviour script)
+        {
+            scripts.Add(script);
+            return;
+        }
+        if (value is MonoBehaviour[] scriptArray)
+        {
+            scripts.AddRange(scriptArray.Where(s => s != null));
+            return;
+        }
+        if (value is IEnumerable<MonoBehaviour> scriptEnumerable)
+        {
+            scripts.AddRange(scriptEnumerable.Where(s => s != null));
+        }
+    }
+
+    private static string BuildActionEffectInline(ItemAction action, float cookingMultiplier)
+    {
+        if (action == null)
+        {
+            return string.Empty;
+        }
+
+        if (action is Action_RestoreHunger restoreHunger)
+        {
+            float amount = ApplyCookingMultiplier(restoreHunger.restorationAmount, cookingMultiplier);
+            return ProcessEffectInline(amount * -1f, "Hunger");
+        }
+        if (action is Action_GiveExtraStamina giveStamina)
+        {
+            float amount = ApplyCookingMultiplier(giveStamina.amount, cookingMultiplier);
+            return ProcessEffectInline(amount, "Extra Stamina");
+        }
+        if (action is Action_ModifyStatus modifyStatus)
+        {
+            float amount = ApplyCookingMultiplier(modifyStatus.changeAmount, cookingMultiplier);
+            return ProcessEffectInline(amount, modifyStatus.statusType.ToString());
+        }
+        if (action is Action_ApplyAffliction applyAffliction)
+        {
+            List<string> parts = new List<string>();
+            if (applyAffliction.affliction != null)
+            {
+                parts.Add(ToInlineText(ProcessAffliction(applyAffliction.affliction, cookingMultiplier)));
+            }
+            if (applyAffliction.extraAfflictions != null)
+            {
+                foreach (var extra in applyAffliction.extraAfflictions)
+                {
+                    if (extra == null)
+                    {
+                        continue;
+                    }
+                    parts.Add(ToInlineText(ProcessAffliction(extra, cookingMultiplier)));
+                }
+            }
+            return string.Join(" ", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
+        }
+        if (action is Action_ApplyMassAffliction applyMassAffliction)
+        {
+            string text = GetText("ApplyMassAffliction");
+            text += ProcessAffliction(applyMassAffliction.affliction, cookingMultiplier);
+            if (applyMassAffliction.extraAfflictions != null && applyMassAffliction.extraAfflictions.Length > 0)
+            {
+                for (int i = 0; i < applyMassAffliction.extraAfflictions.Length; i++)
+                {
+                    text += ProcessAffliction(applyMassAffliction.extraAfflictions[i], cookingMultiplier);
+                }
+            }
+            return ToInlineText(text);
+        }
+        if (action is Action_Die)
+        {
+            return GetText("COOK_ACTION_DIE", effectColors["Injury"]);
+        }
+
+        return action.GetType().Name;
+    }
+
+    private static string ToInlineText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        string result = text.Replace("\r\n", " ").Replace("\n", " ").Replace("\r", " ");
+        return result.Trim();
     }
 
     private static bool HasExplodeOnUseBehavior(object behavior)
@@ -2347,6 +2898,7 @@ public partial class Plugin : BaseUnityPlugin
         {
             Log.LogInfo($"[TestMode]   - {(c == null ? "<Missing Script>" : c.GetType().Name)}");
         }
+        LogItemCookingDetails(currentItem);
         Log.LogInfo($"[TestMode] Display Text:\n{itemInfoDisplayTextMesh.text}");
     }
 
@@ -2417,6 +2969,7 @@ public partial class Plugin : BaseUnityPlugin
             {
                 Log.LogInfo($"[TestMode]   - {(c == null ? "<Missing Script>" : c.GetType().Name)}");
             }
+            LogItemCookingDetails(itemForLog);
 
             ProcessItemGameObject(itemForLog);
             string displayText = itemInfoDisplayTextMesh.text;
@@ -2430,6 +2983,166 @@ public partial class Plugin : BaseUnityPlugin
                 UnityEngine.Object.Destroy(tempObj);
             }
         }
+    }
+
+
+    private static void LogItemCookingDetails(Item item)
+    {
+        if (item == null)
+        {
+            return;
+        }
+
+        ItemCooking itemCooking = item.GetComponent<ItemCooking>();
+        if (itemCooking == null)
+        {
+            Log.LogInfo("[TestMode] Cooking: <none>");
+            return;
+        }
+
+        Log.LogInfo($"[TestMode] Cooking: preCooked={itemCooking.preCooked}, timesCookedLocal={itemCooking.timesCookedLocal}, canBeCooked={itemCooking.canBeCooked}, wreckWhenCooked={itemCooking.wreckWhenCooked}, ignoreDefaultCookBehavior={itemCooking.ignoreDefaultCookBehavior}");
+        if (itemCooking.explosionPrefab != null)
+        {
+            Log.LogInfo($"[TestMode] Cooking: explosionPrefab={itemCooking.explosionPrefab.name}");
+        }
+
+        AdditionalCookingBehavior[] behaviors = itemCooking.additionalCookingBehaviors;
+        if (behaviors == null || behaviors.Length == 0)
+        {
+            Log.LogInfo("[TestMode] CookingBehaviors: <none>");
+            return;
+        }
+
+        Log.LogInfo($"[TestMode] CookingBehaviors: {behaviors.Length}");
+        for (int i = 0; i < behaviors.Length; i++)
+        {
+            AdditionalCookingBehavior behavior = behaviors[i];
+            if (behavior == null)
+            {
+                Log.LogInfo("[TestMode]   - <null>");
+                continue;
+            }
+
+            string details = $"{behavior.GetType().Name} (trigger>={behavior.cookedAmountToTrigger}, onlyOnce={behavior.onlyOnce})";
+            if (behavior is CookingBehavior_Explode explode)
+            {
+                details += $" dontRunIfOutOfFuel={explode.dontRunIfOutOfFuel}";
+            }
+            else if (behavior is CookingBehavior_AdjustStatusInstantly adjust)
+            {
+                details += $" status={adjust.statusType} amount={adjust.amount}";
+            }
+            else if (behavior is CookingBehavior_ChangeAfflictionTime change)
+            {
+                string actionName = change.action == null ? "null" : change.action.GetType().Name;
+                details += $" change={change.change} action={actionName}";
+            }
+            else if (behavior is CookingBehavior_EnableScripts enableScripts)
+            {
+                details += $" scripts={FormatComponentList(enableScripts.scriptsToEnable)}";
+            }
+            else if (behavior is CookingBehavior_MessUpAudio mess)
+            {
+                details += $" pitchReductionPerCooking={mess.pitchReductionPerCooking} volumeReductionPerCooking={mess.volumeReductionPerCooking}";
+            }
+            else if (behavior is CookingBehavior_ModifyAudioSourcePitch modifyPitch)
+            {
+                details += $" changePerCooking={modifyPitch.changePerCooking}";
+            }
+
+            Log.LogInfo($"[TestMode]   - {details}");
+
+            if (behavior is CookingBehavior_RunActions runActions)
+            {
+                LogRunActions(runActions);
+            }
+        }
+    }
+
+    private static void LogRunActions(CookingBehavior_RunActions runActions)
+    {
+        if (runActions.actionsToRun == null || runActions.actionsToRun.Length == 0)
+        {
+            Log.LogInfo("[TestMode]     * actionsToRun: <none>");
+            return;
+        }
+
+        Log.LogInfo($"[TestMode]     * actionsToRun: {runActions.actionsToRun.Length}");
+        foreach (ItemAction action in runActions.actionsToRun)
+        {
+            if (action == null)
+            {
+                Log.LogInfo("[TestMode]       - <null>");
+                continue;
+            }
+
+            string info = action.GetType().Name;
+            if (action is Action_RestoreHunger restore)
+            {
+                info += $" restore={restore.restorationAmount}";
+            }
+            else if (action is Action_GiveExtraStamina stamina)
+            {
+                info += $" amount={stamina.amount}";
+            }
+            else if (action is Action_ModifyStatus modify)
+            {
+                info += $" status={modify.statusType} change={modify.changeAmount} ifSkeleton={modify.ifSkeleton}";
+            }
+            else if (action is Action_ApplyAffliction apply)
+            {
+                info += $" affliction={FormatAfflictionInfo(apply.affliction)}";
+                if (apply.extraAfflictions != null && apply.extraAfflictions.Length > 0)
+                {
+                    string extras = string.Join(", ", apply.extraAfflictions.Select(FormatAfflictionInfo));
+                    info += $" extraAfflictions=[{extras}]";
+                }
+            }
+
+            Log.LogInfo($"[TestMode]       - {info}");
+        }
+    }
+
+    private static string FormatComponentList(MonoBehaviour[] scripts)
+    {
+        if (scripts == null || scripts.Length == 0)
+        {
+            return "[]";
+        }
+
+        List<string> names = new List<string>();
+        foreach (MonoBehaviour script in scripts)
+        {
+            names.Add(script == null ? "<null>" : script.GetType().Name);
+        }
+
+        return $"[{string.Join(", ", names)}]";
+    }
+
+    private static string FormatAfflictionInfo(Peak.Afflictions.Affliction affliction)
+    {
+        if (affliction == null)
+        {
+            return "null";
+        }
+
+        string name = affliction.GetType().Name;
+        string typeName = string.Empty;
+        try
+        {
+            typeName = affliction.GetAfflictionType().ToString();
+        }
+        catch
+        {
+            typeName = string.Empty;
+        }
+
+        if (!string.IsNullOrEmpty(typeName))
+        {
+            return $"{name}({typeName})";
+        }
+
+        return name;
     }
 
     private static void AddDisplayObject()
