@@ -208,6 +208,7 @@ public partial class Plugin : BaseUnityPlugin
         Component[] activeComponents = allComponents
             .Where(IsComponentActiveForDisplay)
             .ToArray();
+        bool isConsumableForCooking = IsConsumableForCookingDelta(activeComponents);
         Action_ModifyStatus[] modifyStatusComponents = activeComponents
             .OfType<Action_ModifyStatus>()
             .ToArray();
@@ -818,7 +819,17 @@ public partial class Plugin : BaseUnityPlugin
             {
                 itemCooking = (ItemCooking)itemComponents[i];
                 bool breaksWhenCooked = itemCooking.wreckWhenCooked || hasCookingWreck;
-                List<string> nextCookLines = BuildNextCookDeltaLines(itemCooking, cookingBehaviors, hasCookUseExplosion, breaksWhenCooked, cookingMultiplier);
+                bool showCanBeCooked = !hasCookingExplosion && !breaksWhenCooked;
+                bool hasDeltaHeader;
+                List<string> nextCookLines = BuildNextCookDeltaLines(itemCooking, cookingBehaviors, hasCookUseExplosion, breaksWhenCooked, cookingMultiplier, isConsumableForCooking, showCanBeCooked, out hasDeltaHeader);
+                bool appendDeltaHeaderToCookLine = showCanBeCooked && itemCooking.timesCookedLocal == 0;
+                string inlineNextCookLine = null;
+                bool consumeInlineNextCookLine = false;
+                if (appendDeltaHeaderToCookLine && !hasDeltaHeader && nextCookLines.Count == 1 && IsCookNextHintLine(nextCookLines[0]))
+                {
+                    inlineNextCookLine = nextCookLines[0];
+                    consumeInlineNextCookLine = true;
+                }
 
                 if (!itemCooking.canBeCooked)
                 {
@@ -836,13 +847,17 @@ public partial class Plugin : BaseUnityPlugin
                 }
                 else if (itemCooking.timesCookedLocal == 0)
                 {
-                    if (!hasCookingExplosion)
+                    if (showCanBeCooked)
                     {
                         suffixCooked += $"\n{GetText("COOK", effectColors["Extra Stamina"])}</color>";//CAN BE COOKED
-                    }
-                    else
-                    {
-                        suffixCooked += "\n";
+                        if (hasDeltaHeader)
+                        {
+                            suffixCooked += $" {GetText("COOK_NEXT_DELTA")}";
+                        }
+                        else if (!string.IsNullOrWhiteSpace(inlineNextCookLine))
+                        {
+                            suffixCooked += $" {inlineNextCookLine}";
+                        }
                     }
                 }
                 else if (itemCooking.timesCookedLocal <= 2)
@@ -865,6 +880,14 @@ public partial class Plugin : BaseUnityPlugin
                     && itemCooking.timesCookedLocal < ItemCooking.COOKING_MAX
                     && nextCookLines.Count > 0)
                 {
+                    if (consumeInlineNextCookLine && inlineNextCookLine != null && nextCookLines.Count == 1 && nextCookLines[0] == inlineNextCookLine)
+                    {
+                        nextCookLines.Clear();
+                    }
+                    if (hasDeltaHeader && !appendDeltaHeaderToCookLine)
+                    {
+                        nextCookLines.Insert(0, GetText("COOK_NEXT_DELTA"));
+                    }
                     AppendCookDeltaLines(ref suffixCooked, nextCookLines);
                 }
             }
@@ -1746,9 +1769,10 @@ public partial class Plugin : BaseUnityPlugin
         return GetText("COOK_NEXT_POISON", effectColors["Poison"]);
     }
 
-    private static List<string> BuildNextCookDeltaLines(ItemCooking itemCooking, IReadOnlyList<AdditionalCookingBehavior> cookingBehaviors, bool hasCookUseExplosion, bool breaksWhenCooked, float cookingMultiplier)
+    private static List<string> BuildNextCookDeltaLines(ItemCooking itemCooking, IReadOnlyList<AdditionalCookingBehavior> cookingBehaviors, bool hasCookUseExplosion, bool breaksWhenCooked, float cookingMultiplier, bool isConsumable, bool allowCookPreview, out bool hasDeltaHeader)
     {
         List<string> lines = new List<string>();
+        hasDeltaHeader = false;
         if (itemCooking == null || !itemCooking.canBeCooked || itemCooking.timesCookedLocal >= ItemCooking.COOKING_MAX)
         {
             return lines;
@@ -1758,9 +1782,9 @@ public partial class Plugin : BaseUnityPlugin
         bool willExplode = WillExplodeOnNextCook(itemCooking, cookingBehaviors, nextCooked);
 
         List<string> deltaEffects = new List<string>();
-        if (!itemCooking.ignoreDefaultCookBehavior && !willExplode)
+        if (allowCookPreview && !breaksWhenCooked && !itemCooking.ignoreDefaultCookBehavior && !willExplode)
         {
-            deltaEffects.AddRange(BuildDefaultNextCookDeltaEffects(itemCooking, nextCooked, cookingMultiplier));
+            deltaEffects.AddRange(BuildDefaultNextCookDeltaEffects(itemCooking, nextCooked, cookingMultiplier, isConsumable));
         }
 
         List<string> onCookValueEffects = new List<string>();
@@ -1846,7 +1870,7 @@ public partial class Plugin : BaseUnityPlugin
         {
             onCookFullLines.Add($"{TrimLeadingSeparator(GetText("COOK_DISABLE"))}{string.Join(" ", disableEffects)}");
         }
-        if (hasCookUseExplosion)
+        if (allowCookPreview && hasCookUseExplosion)
         {
             onCookFullLines.Add(TrimLeadingSeparator(GetText("COOK_USE_EXPLODE", effectColors["Injury"])));
         }
@@ -1855,17 +1879,17 @@ public partial class Plugin : BaseUnityPlugin
             onCookFullLines.Add(TrimLeadingSeparator(GetText("COOK_BROKEN", effectColors["Curse"])));
         }
 
-        if (deltaEffects.Count > 0)
+        if (allowCookPreview && deltaEffects.Count > 0)
         {
-            string deltaPrefix = GetText("COOK_NEXT_DELTA");
             foreach (string effect in deltaEffects)
             {
                 if (string.IsNullOrWhiteSpace(effect))
                 {
                     continue;
                 }
-                lines.Add($"{deltaPrefix}{effect}");
+                lines.Add($"• {effect}");
             }
+            hasDeltaHeader = true;
         }
 
         if (onCookValueEffects.Count > 0)
@@ -1886,7 +1910,7 @@ public partial class Plugin : BaseUnityPlugin
             lines.AddRange(onCookFullLines.Where(line => !string.IsNullOrWhiteSpace(line)));
         }
 
-        if (lines.Count == 0)
+        if (lines.Count == 0 && allowCookPreview)
         {
             lines.Add(TrimLeadingSeparator(GetText("COOK_NEXT_NONE", effectColors["Curse"])));
         }
@@ -1894,16 +1918,26 @@ public partial class Plugin : BaseUnityPlugin
         return lines;
     }
 
-    private static List<string> BuildDefaultNextCookDeltaEffects(ItemCooking itemCooking, int nextCooked, float cookingMultiplier)
+    private static List<string> BuildDefaultNextCookDeltaEffects(ItemCooking itemCooking, int nextCooked, float cookingMultiplier, bool isConsumable)
     {
         List<string> effects = new List<string>();
-        if (itemCooking == null)
+        if (itemCooking == null || !isConsumable)
         {
             return effects;
         }
 
         Action_RestoreHunger restoreHunger = itemCooking.GetComponent<Action_RestoreHunger>();
-        if (restoreHunger != null && IsComponentActiveForDisplay(restoreHunger))
+        bool hasRestoreHunger = restoreHunger != null && IsComponentActiveForDisplay(restoreHunger);
+        Action_GiveExtraStamina giveStamina = itemCooking.GetComponent<Action_GiveExtraStamina>();
+        bool hasGiveStamina = giveStamina != null && IsComponentActiveForDisplay(giveStamina);
+        Action_InflictPoison inflictPoison = itemCooking.GetComponent<Action_InflictPoison>();
+        bool hasInflictPoison = inflictPoison != null && IsComponentActiveForDisplay(inflictPoison);
+        if (!hasRestoreHunger && !hasGiveStamina && !hasInflictPoison)
+        {
+            return effects;
+        }
+
+        if (hasRestoreHunger)
         {
             float current = restoreHunger.restorationAmount;
             float nextValue = current;
@@ -1924,18 +1958,11 @@ public partial class Plugin : BaseUnityPlugin
         }
 
         float currentStamina = 0f;
-        bool canShowStaminaDelta = true;
-        Action_GiveExtraStamina giveStamina = itemCooking.GetComponent<Action_GiveExtraStamina>();
-        if (giveStamina != null)
+        bool canShowStaminaDelta = false;
+        if (hasGiveStamina)
         {
-            if (!IsComponentActiveForDisplay(giveStamina))
-            {
-                canShowStaminaDelta = false;
-            }
-            else
-            {
-                currentStamina = giveStamina.amount;
-            }
+            currentStamina = giveStamina.amount;
+            canShowStaminaDelta = true;
         }
 
         if (canShowStaminaDelta)
@@ -2077,6 +2104,56 @@ public partial class Plugin : BaseUnityPlugin
         return true;
     }
 
+    private static bool IsConsumableForCookingDelta(IEnumerable<Component> components)
+    {
+        if (components == null)
+        {
+            return false;
+        }
+
+        foreach (Component component in components)
+        {
+            if (component == null)
+            {
+                continue;
+            }
+
+            if (component is ItemUseFeedback feedback)
+            {
+                if (feedback.useAnimation.Equals("Eat") || feedback.useAnimation.Equals("Drink") || feedback.useAnimation.Equals("Heal"))
+                {
+                    return true;
+                }
+            }
+            else if (component is Action_Consume)
+            {
+                return true;
+            }
+            else if (component is Action_ConsumeAndSpawn)
+            {
+                return true;
+            }
+            else if (component is Action_RaycastDart)
+            {
+                return true;
+            }
+            else if (component is Action_SpawnGuidebookPage)
+            {
+                return true;
+            }
+            else if (component is Action_RestoreHunger)
+            {
+                return true;
+            }
+            else if (component is Action_GiveExtraStamina)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static void AppendCookDeltaLines(ref string suffixCooked, IReadOnlyList<string> lines)
     {
         if (lines == null || lines.Count == 0)
@@ -2107,6 +2184,18 @@ public partial class Plugin : BaseUnityPlugin
         }
 
         suffixCooked += combined;
+    }
+
+    private static bool IsCookNextHintLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return false;
+        }
+
+        return line.IndexOf("NEXT COOK", StringComparison.OrdinalIgnoreCase) >= 0
+            || line.Contains("下次烹饪", StringComparison.Ordinal)
+            || line.Contains("下次烹飪", StringComparison.Ordinal);
     }
 
     private static string TrimLeadingSeparator(string text)
@@ -2177,7 +2266,7 @@ public partial class Plugin : BaseUnityPlugin
                 continue;
             }
 
-            AppendHint(target, script.GetType().Name);
+            AppendHint(target, GetFriendlyActionName(script.GetType()));
         }
     }
 
@@ -2265,7 +2354,39 @@ public partial class Plugin : BaseUnityPlugin
         if (action is Action_ModifyStatus modifyStatus)
         {
             float amount = ApplyCookingMultiplier(modifyStatus.changeAmount, cookingMultiplier);
-            return ProcessEffectInline(amount, modifyStatus.statusType.ToString());
+            string effectText = ProcessEffectInline(amount, modifyStatus.statusType.ToString());
+            if (modifyStatus.ifSkeleton)
+            {
+                effectText = $"{effectText} {GetText("COOK_IF_SKELETON")}";
+            }
+            return effectText;
+        }
+        if (action is Action_InflictPoison inflictPoison)
+        {
+            float poisonPerSecond = ApplyCookingMultiplier(inflictPoison.poisonPerSecond, cookingMultiplier);
+            string text = GetText("InflictPoison", inflictPoison.delay.ToString(), ProcessEffectOverTime(poisonPerSecond, 1f, inflictPoison.inflictionTime, "Poison"));
+            return ToInlineText(text);
+        }
+        if (action is Action_ClearAllStatus clearAllStatus)
+        {
+            string clearAllStatusText = GetText("ClearAllStatus_Base", effectColors["ItemInfoDisplayPositive"]);
+            if (clearAllStatus.excludeCurse)
+            {
+                clearAllStatusText += GetText("ClearAllStatus_ExceptCurse", effectColors["Curse"]);
+            }
+            if (clearAllStatus.otherExclusions.Count > 0)
+            {
+                foreach (CharacterAfflictions.STATUSTYPE exclusion in clearAllStatus.otherExclusions)
+                {
+                    clearAllStatusText += ", " + effectColors[exclusion.ToString()] + GetText($"Effect_{exclusion.ToString().ToUpper()}").ToUpper() + "</color>";
+                }
+            }
+            clearAllStatusText = clearAllStatusText.Replace(", <#E13542>" + GetText("Effect_CRAB").ToUpper() + "</color>", "");
+            return ToInlineText(clearAllStatusText);
+        }
+        if (action is Action_BecomeSkeleton)
+        {
+            return GetText("COOK_ACTION_BECOME_SKELETON", effectColors["Curse"]);
         }
         if (action is Action_ApplyAffliction applyAffliction)
         {
@@ -2300,12 +2421,38 @@ public partial class Plugin : BaseUnityPlugin
             }
             return ToInlineText(text);
         }
+        if (action is Action_RaycastDart)
+        {
+            return ToInlineText(GetText("RaycastDart"));
+        }
+        if (action is Action_ConsumeAndSpawn consumeAndSpawn)
+        {
+            if (consumeAndSpawn.itemToSpawn != null && consumeAndSpawn.itemToSpawn.ToString().Contains("Peel"))
+            {
+                return ToInlineText(GetText("ConsumeAndSpawn_Peel"));
+            }
+        }
         if (action is Action_Die)
         {
             return GetText("COOK_ACTION_DIE", effectColors["Injury"]);
         }
 
-        return action.GetType().Name;
+        return GetFriendlyActionName(action.GetType());
+    }
+
+    private static string GetFriendlyActionName(Type type)
+    {
+        if (type == null)
+        {
+            return string.Empty;
+        }
+
+        string name = type.Name;
+        if (name.StartsWith("Action_", StringComparison.Ordinal))
+        {
+            name = name.Substring("Action_".Length);
+        }
+        return name.Replace('_', ' ');
     }
 
     private static string ToInlineText(string text)
