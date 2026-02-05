@@ -849,7 +849,7 @@ public partial class Plugin : BaseUnityPlugin
                 {
                     if (showCanBeCooked)
                     {
-                        suffixCooked += $"\n{GetText("COOK", effectColors["Extra Stamina"])}</color>";//CAN BE COOKED
+                        suffixCooked += $"{GetText("COOK", effectColors["Extra Stamina"])}</color>";//CAN BE COOKED
                         if (hasDeltaHeader)
                         {
                             suffixCooked += $" {GetText("COOK_NEXT_DELTA")}";
