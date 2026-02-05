@@ -232,6 +232,7 @@ public partial class Plugin : BaseUnityPlugin
         bool hasCookingExplosion = false;
         bool hasCookingWreck = false;
         bool hasCookUseExplosion = false;
+        bool suppressThrowAchievement = false;
         List<AdditionalCookingBehavior> cookingBehaviors = new List<AdditionalCookingBehavior>();
 
         if (itemCooking != null && itemCooking.additionalCookingBehaviors != null)
@@ -267,6 +268,10 @@ public partial class Plugin : BaseUnityPlugin
                                 break;
                             }
                         }
+                        if (!hasCookUseExplosion && ScriptsContainSpawnExplosion(enableScripts.scriptsToEnable))
+                        {
+                            hasCookUseExplosion = true;
+                        }
                     }
                     continue;
                 }
@@ -285,14 +290,18 @@ public partial class Plugin : BaseUnityPlugin
                                 hasCookingExplosion = true;
                                 break;
                             }
-                            if (action is Action_Spawn spawnAction && spawnAction.objectToSpawn != null)
+                        if (action is Action_Spawn spawnAction && spawnAction.objectToSpawn != null)
+                        {
+                            if (ContainsExplodeKeyword(spawnAction.objectToSpawn.name))
                             {
-                                if (ContainsExplodeKeyword(spawnAction.objectToSpawn.name))
-                                {
-                                    hasCookingExplosion = true;
-                                    break;
-                                }
+                                hasCookingExplosion = true;
+                                break;
                             }
+                        }
+                        if (action is Action_RaycastDart)
+                        {
+                            hasCookUseExplosion = true;
+                        }
                         }
                     }
                     continue;
@@ -796,6 +805,7 @@ public partial class Plugin : BaseUnityPlugin
             else if (itemComponents[i].GetType() == typeof(Mandrake))
             {
                 itemInfoDisplayTextMesh.text += $"{GetText("Mandrake", effectColors["Drowsy"], effectColors["Heat"])}";
+                suppressThrowAchievement = true;
             }
             else if (itemComponents[i].GetType() == typeof(Snowball))
             {
@@ -821,15 +831,16 @@ public partial class Plugin : BaseUnityPlugin
                 bool breaksWhenCooked = itemCooking.wreckWhenCooked || hasCookingWreck;
                 bool showCanBeCooked = !hasCookingExplosion && !breaksWhenCooked;
                 bool hasDeltaHeader;
-                List<string> nextCookLines = BuildNextCookDeltaLines(itemCooking, cookingBehaviors, hasCookUseExplosion, breaksWhenCooked, cookingMultiplier, isConsumableForCooking, showCanBeCooked, out hasDeltaHeader);
-                bool appendDeltaHeaderToCookLine = showCanBeCooked && itemCooking.timesCookedLocal == 0;
+                List<string> nextCookLines = BuildNextCookDeltaLines(itemCooking, cookingBehaviors, hasCookUseExplosion, breaksWhenCooked, cookingMultiplier, isConsumableForCooking, showCanBeCooked, suppressThrowAchievement, out hasDeltaHeader);
+                bool allowInlineNextCookLine = showCanBeCooked && itemCooking.timesCookedLocal == 0;
                 string inlineNextCookLine = null;
                 bool consumeInlineNextCookLine = false;
-                if (appendDeltaHeaderToCookLine && !hasDeltaHeader && nextCookLines.Count == 1 && IsCookNextHintLine(nextCookLines[0]))
+                if (allowInlineNextCookLine && !hasDeltaHeader && nextCookLines.Count == 1 && IsCookNextHintLine(nextCookLines[0]))
                 {
                     inlineNextCookLine = nextCookLines[0];
                     consumeInlineNextCookLine = true;
                 }
+                bool appendedDeltaHeaderToCookLine = false;
 
                 if (!itemCooking.canBeCooked)
                 {
@@ -853,6 +864,7 @@ public partial class Plugin : BaseUnityPlugin
                         if (hasDeltaHeader)
                         {
                             suffixCooked += $" {GetText("COOK_NEXT_DELTA")}";
+                            appendedDeltaHeaderToCookLine = true;
                         }
                         else if (!string.IsNullOrWhiteSpace(inlineNextCookLine))
                         {
@@ -863,16 +875,31 @@ public partial class Plugin : BaseUnityPlugin
                 else if (itemCooking.timesCookedLocal <= 2)
                 {
                     suffixCooked += $"{GetText("COOKED", effectColors["Extra Stamina"], itemCooking.timesCookedLocal.ToString())}";
+                    if (hasDeltaHeader)
+                    {
+                        suffixCooked += $" {GetText("COOK_NEXT_DELTA")}";
+                        appendedDeltaHeaderToCookLine = true;
+                    }
                     //suffixCooked += "   " + effectColors["Extra Stamina"] + itemCooking.timesCookedLocal.ToString() + "x COOKED</color>\n" + effectColors["Hunger"] + "CAN BE COOKED</color>";
                 }
                 else if (itemCooking.timesCookedLocal == 3)
                 {
                     suffixCooked += $"{GetText("COOKED", effectColors["Injury"], itemCooking.timesCookedLocal.ToString())}";
+                    if (hasDeltaHeader)
+                    {
+                        suffixCooked += $" {GetText("COOK_NEXT_DELTA")}";
+                        appendedDeltaHeaderToCookLine = true;
+                    }
                     //suffixCooked += "   " + effectColors["Injury"] + itemCooking.timesCookedLocal.ToString() + "x COOKED</color>\n" + effectColors["Poison"] + "CAN BE COOKED</color>";
                 }
                 else if (itemCooking.timesCookedLocal >= 4)
                 {
                     suffixCooked += $"{GetText("COOKED", effectColors["Poison"], itemCooking.timesCookedLocal.ToString())}";
+                    if (hasDeltaHeader)
+                    {
+                        suffixCooked += $" {GetText("COOK_NEXT_DELTA")}";
+                        appendedDeltaHeaderToCookLine = true;
+                    }
                     //suffixCooked += "   " + effectColors["Poison"] + itemCooking.timesCookedLocal.ToString() + "x COOKED\nCAN BE COOKED</color>";
                 }
 
@@ -884,7 +911,7 @@ public partial class Plugin : BaseUnityPlugin
                     {
                         nextCookLines.Clear();
                     }
-                    if (hasDeltaHeader && !appendDeltaHeaderToCookLine)
+                    if (hasDeltaHeader && !appendedDeltaHeaderToCookLine)
                     {
                         nextCookLines.Insert(0, GetText("COOK_NEXT_DELTA"));
                     }
@@ -1769,7 +1796,7 @@ public partial class Plugin : BaseUnityPlugin
         return GetText("COOK_NEXT_POISON", effectColors["Poison"]);
     }
 
-    private static List<string> BuildNextCookDeltaLines(ItemCooking itemCooking, IReadOnlyList<AdditionalCookingBehavior> cookingBehaviors, bool hasCookUseExplosion, bool breaksWhenCooked, float cookingMultiplier, bool isConsumable, bool allowCookPreview, out bool hasDeltaHeader)
+    private static List<string> BuildNextCookDeltaLines(ItemCooking itemCooking, IReadOnlyList<AdditionalCookingBehavior> cookingBehaviors, bool hasCookUseExplosion, bool breaksWhenCooked, float cookingMultiplier, bool isConsumable, bool allowCookPreview, bool suppressThrowAchievement, out bool hasDeltaHeader)
     {
         List<string> lines = new List<string>();
         hasDeltaHeader = false;
@@ -1833,6 +1860,10 @@ public partial class Plugin : BaseUnityPlugin
                 {
                     foreach (ItemAction action in runActions.actionsToRun)
                     {
+                        if (suppressThrowAchievement && action is Action_ThrowAchievement)
+                        {
+                            continue;
+                        }
                         string effect = BuildActionEffectInline(action, cookingMultiplier);
                         AppendHint(onCookValueEffects, effect);
                     }
@@ -1841,7 +1872,7 @@ public partial class Plugin : BaseUnityPlugin
             }
             if (behavior is CookingBehavior_EnableScripts enableScripts)
             {
-                AddScriptEffectHints(enableEffects, enableScripts.scriptsToEnable, cookingMultiplier);
+                AddScriptEffectHints(enableEffects, enableScripts.scriptsToEnable, cookingMultiplier, suppressThrowAchievement, allowCookPreview);
                 continue;
             }
             if (behavior is CookingBehavior_MessUpAudio || behavior is CookingBehavior_ModifyAudioSourcePitch)
@@ -1852,7 +1883,7 @@ public partial class Plugin : BaseUnityPlugin
 
             if (IsDisableScriptsBehavior(behavior))
             {
-                AddScriptEffectHints(disableEffects, GetBehaviorScripts(behavior), cookingMultiplier);
+                AddScriptEffectHints(disableEffects, GetBehaviorScripts(behavior), cookingMultiplier, suppressThrowAchievement, allowCookPreview);
                 continue;
             }
             if (IsModifyBugleWobbleBehavior(behavior))
@@ -1910,9 +1941,17 @@ public partial class Plugin : BaseUnityPlugin
             lines.AddRange(onCookFullLines.Where(line => !string.IsNullOrWhiteSpace(line)));
         }
 
-        if (lines.Count == 0 && allowCookPreview)
+        if (allowCookPreview && deltaEffects.Count == 0)
         {
-            lines.Add(TrimLeadingSeparator(GetText("COOK_NEXT_NONE", effectColors["Curse"])));
+            bool shouldShowNoEffect = !willExplode && !breaksWhenCooked && !hasCookUseExplosion;
+            if (shouldShowNoEffect)
+            {
+                string noEffectLine = TrimLeadingSeparator(GetText("COOK_NEXT_NONE", effectColors["Curse"]));
+                if (!string.IsNullOrWhiteSpace(noEffectLine) && !lines.Contains(noEffectLine))
+                {
+                    lines.Insert(0, noEffectLine);
+                }
+            }
         }
 
         return lines;
@@ -2243,10 +2282,29 @@ public partial class Plugin : BaseUnityPlugin
             afflictionName = "Affliction";
         }
 
+        afflictionName = GetAfflictionDisplayName(afflictionName);
         return GetText("COOK_AFFLICTION_TIME", afflictionName, sign, amountText);
     }
 
-    private static void AddScriptEffectHints(List<string> target, IEnumerable<MonoBehaviour> scripts, float cookingMultiplier)
+    private static string GetAfflictionDisplayName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return string.Empty;
+        }
+
+        switch (name.Trim())
+        {
+            case "Invincibility":
+                return GetText("AFFLICTION_NAME_INVINCIBILITY");
+            case "Numb":
+                return GetText("AFFLICTION_NAME_NUMB");
+        }
+
+        return name;
+    }
+
+    private static void AddScriptEffectHints(List<string> target, IEnumerable<MonoBehaviour> scripts, float cookingMultiplier, bool suppressThrowAchievement, bool allowCookPreview)
     {
         if (scripts == null)
         {
@@ -2259,9 +2317,17 @@ public partial class Plugin : BaseUnityPlugin
             {
                 continue;
             }
+            if (suppressThrowAchievement && script is Action_ThrowAchievement)
+            {
+                continue;
+            }
 
             if (script is ItemAction action)
             {
+                if (allowCookPreview && action is Action_Spawn)
+                {
+                    continue;
+                }
                 AppendHint(target, BuildActionEffectInline(action, cookingMultiplier));
                 continue;
             }
@@ -2367,6 +2433,43 @@ public partial class Plugin : BaseUnityPlugin
             string text = GetText("InflictPoison", inflictPoison.delay.ToString(), ProcessEffectOverTime(poisonPerSecond, 1f, inflictPoison.inflictionTime, "Poison"));
             return ToInlineText(text);
         }
+        if (action is Action_AddOrRemoveThorns addOrRemoveThorns)
+        {
+            int thornCount = addOrRemoveThorns.thornCount;
+            if (thornCount == 0)
+            {
+                return string.Empty;
+            }
+
+            string countText = Math.Abs(thornCount).ToString();
+            if (thornCount > 0)
+            {
+                return GetText("COOK_ACTION_THORNS_ADD", effectColors["ItemInfoDisplayPositive"], effectColors["Thorns"], countText);
+            }
+
+            return GetText("COOK_ACTION_THORNS_REMOVE", effectColors["ItemInfoDisplayNegative"], effectColors["Thorns"], countText);
+        }
+        if (action is Action_ThrowAchievement throwAchievement)
+        {
+            string achievementName = throwAchievement.achievementType.ToString().Replace('_', ' ');
+            if (string.IsNullOrWhiteSpace(achievementName))
+            {
+                return string.Empty;
+            }
+
+            return GetText("COOK_ACTION_THROW_ACHIEVEMENT", effectColors["ItemInfoDisplayPositive"], effectColors["ItemInfoDisplayPositive"], achievementName);
+        }
+        if (action is Action_Numb numb)
+        {
+            float seconds = ApplyCookingMultiplier(numb.numbAmount, cookingMultiplier);
+            string amountText = seconds.ToString("F1").Replace(".0", "");
+            if (string.IsNullOrWhiteSpace(amountText))
+            {
+                return string.Empty;
+            }
+
+            return GetText("COOK_ACTION_NUMB", effectColors["ItemInfoDisplayNegative"], amountText);
+        }
         if (action is Action_ClearAllStatus clearAllStatus)
         {
             string clearAllStatusText = GetText("ClearAllStatus_Base", effectColors["ItemInfoDisplayPositive"]);
@@ -2436,6 +2539,38 @@ public partial class Plugin : BaseUnityPlugin
         {
             return GetText("COOK_ACTION_DIE", effectColors["Injury"]);
         }
+        if (action is Action_RaycastDart raycastDart)
+        {
+            List<string> parts = new List<string>();
+            if (raycastDart.afflictionsOnHit != null)
+            {
+                foreach (var affliction in raycastDart.afflictionsOnHit)
+                {
+                    if (affliction == null)
+                    {
+                        continue;
+                    }
+                    string text = ToInlineText(ProcessAffliction(affliction, cookingMultiplier));
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        parts.Add(text);
+                    }
+                }
+            }
+
+            if (parts.Count > 0)
+            {
+                string header = ToInlineText(GetText("RaycastDart"));
+                if (!string.IsNullOrWhiteSpace(header))
+                {
+                    return $"{header} {string.Join(" ", parts)}".Trim();
+                }
+
+                return string.Join(" ", parts);
+            }
+
+            return ToInlineText(GetText("RaycastDart"));
+        }
 
         return GetFriendlyActionName(action.GetType());
     }
@@ -2447,12 +2582,51 @@ public partial class Plugin : BaseUnityPlugin
             return string.Empty;
         }
 
+        string localizedOverride = GetLocalizedActionName(type);
+        if (!string.IsNullOrWhiteSpace(localizedOverride))
+        {
+            return localizedOverride;
+        }
+
         string name = type.Name;
         if (name.StartsWith("Action_", StringComparison.Ordinal))
         {
             name = name.Substring("Action_".Length);
         }
         return name.Replace('_', ' ');
+    }
+
+    private static string GetLocalizedActionName(Type type)
+    {
+        if (type == null)
+        {
+            return string.Empty;
+        }
+
+        string localizedKey = $"Mod_{Name}_{type.Name}".ToUpper();
+        if (!LocalizedText.MAIN_TABLE.ContainsKey(localizedKey))
+        {
+            return string.Empty;
+        }
+
+        string localized = LocalizedText.GetText(localizedKey);
+        if (string.IsNullOrWhiteSpace(localized))
+        {
+            return string.Empty;
+        }
+
+        localized = localized.Trim();
+        if (localized.StartsWith("LOC:", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        if (string.Equals(localized, localizedKey, StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        return localized;
     }
 
     private static string ToInlineText(string text)
@@ -2594,6 +2768,49 @@ public partial class Plugin : BaseUnityPlugin
             || text.IndexOf("Explosion", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
+    private static bool ScriptsContainSpawnExplosion(IEnumerable<MonoBehaviour> scripts)
+    {
+        if (scripts == null)
+        {
+            return false;
+        }
+
+        foreach (MonoBehaviour script in scripts)
+        {
+            if (script is not Action_Spawn spawnAction)
+            {
+                continue;
+            }
+            if (spawnAction.objectToSpawn == null)
+            {
+                continue;
+            }
+            if (ContainsExplodeKeyword(spawnAction.objectToSpawn.name))
+            {
+                return true;
+            }
+
+            try
+            {
+                Component[] components = spawnAction.objectToSpawn.GetComponents<Component>();
+                for (int i = 0; i < components.Length; i++)
+                {
+                    Component component = components[i];
+                    if (component != null && ContainsExplodeKeyword(component.GetType().Name))
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch
+            {
+                // ignore component inspection failures
+            }
+        }
+
+        return false;
+    }
+
     private static string GetEffectColor(string effect)
     {
         if (effectColors.TryGetValue(effect, out string color))
@@ -2664,6 +2881,37 @@ public partial class Plugin : BaseUnityPlugin
         float remainingSeconds = GetLanternRemainingSeconds(item, lantern);
         int remainingInt = Mathf.CeilToInt(remainingSeconds);
         return Mathf.Max(0, remainingInt);
+    }
+
+    private static float GetAfflictionTotalTime(Peak.Afflictions.Affliction affliction)
+    {
+        if (affliction == null)
+        {
+            return 0f;
+        }
+
+        BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        Type type = affliction.GetType();
+        try
+        {
+            FieldInfo field = type.GetField("totalTime", flags);
+            if (field != null && field.FieldType == typeof(float))
+            {
+                return (float)field.GetValue(affliction);
+            }
+
+            PropertyInfo property = type.GetProperty("totalTime", flags);
+            if (property != null && property.PropertyType == typeof(float))
+            {
+                return (float)property.GetValue(affliction, null);
+            }
+        }
+        catch
+        {
+            return 0f;
+        }
+
+        return 0f;
     }
 
     private static string ProcessAffliction(Peak.Afflictions.Affliction affliction, float cookingMultiplier)
@@ -2777,6 +3025,14 @@ public partial class Plugin : BaseUnityPlugin
 
             //result += effectColors[effect.statusType.ToString()] + (Mathf.Abs(effect.statusAmount) * 100f).ToString("F1").Replace(".0", "")
             //    + " " + effect.statusType.ToString().ToUpper() + "</color>\n";
+        }
+        else if (string.Equals(affliction.GetAfflictionType().ToString(), "Invincibility", StringComparison.OrdinalIgnoreCase))
+        {
+            float totalTime = ApplyCookingMultiplier(GetAfflictionTotalTime(affliction), cookingMultiplier);
+            if (totalTime > 0f)
+            {
+                result += GetText("Affliction_Invincibility", effectColors["ItemInfoDisplayPositive"], totalTime.ToString("F1").Replace(".0", ""));
+            }
         }
         else if (affliction.GetAfflictionType() is Peak.Afflictions.Affliction.AfflictionType.DrowsyOverTime)
         {
