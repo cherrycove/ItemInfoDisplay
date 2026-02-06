@@ -440,6 +440,17 @@ public partial class Plugin : BaseUnityPlugin
                 clearAllStatusText = clearAllStatusText.Replace(", <#E13542>" + GetText("Effect_CRAB").ToUpper() + "</color>", "") + "\n";
                 itemInfoDisplayTextMesh.text += clearAllStatusText;
             }
+            else if (itemComponents[i].GetType() == typeof(Action_BecomeSkeleton))
+            {
+                itemInfoDisplayTextMesh.text = AppendWithSectionSpacing(
+                    itemInfoDisplayTextMesh.text,
+                    GetText(
+                        "BecomeSkeleton",
+                        effectColors["ItemInfoDisplayPositive"],
+                        effectColors["Curse"],
+                        effectColors["Injury"],
+                        effectColors["Curse"]));
+            }
             else if (itemComponents[i].GetType() == typeof(Action_ConsumeAndSpawn))
             {
                 Action_ConsumeAndSpawn effect = (Action_ConsumeAndSpawn)itemComponents[i];
@@ -2420,6 +2431,13 @@ public partial class Plugin : BaseUnityPlugin
         if (action is Action_ModifyStatus modifyStatus)
         {
             float amount = ApplyCookingMultiplier(modifyStatus.changeAmount, cookingMultiplier);
+            if (modifyStatus.statusType == CharacterAfflictions.STATUSTYPE.Curse
+                && amount > 0f
+                && amount <= 0.5f + 0.0001f)
+            {
+                // TODO: Use actual component values when available; temporary fix for BookOfBones
+                amount = 0.25f;
+            }
             string effectText = ProcessEffectInline(amount, modifyStatus.statusType.ToString());
             if (modifyStatus.ifSkeleton)
             {
@@ -3234,7 +3252,6 @@ public partial class Plugin : BaseUnityPlugin
 
         allItemPrefabs = db.Objects
             .Where(i => i != null)
-            .OrderBy(i => i.name)
             .ToList();
         EnsureItemNameKeyMap();
         Log.LogInfo($"[TestMode] Loaded {allItemPrefabs.Count} items from ItemDatabase. Press F1/F2 to cycle, F3 to log current item info, F4 to log all items.");
