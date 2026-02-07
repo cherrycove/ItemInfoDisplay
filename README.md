@@ -1,4 +1,4 @@
-﻿# ItemInfoDisplayForkedCNPlus (PEAK)
+# ItemInfoDisplayForkedCNPlus (PEAK)
 
 Forked from jkqt and chuxiaaaa, maintained for current PEAK versions.
 
