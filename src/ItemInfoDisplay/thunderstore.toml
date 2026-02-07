@@ -7,7 +7,7 @@ repository = "https://thunderstore.io"
 [package]
 namespace = "cherrycove"
 name = "ItemInfoDisplayForkedCNPlus"
-description = "Displays item information (CN localization, updated for new PEAK versions). I will update promptly after game updates when time allows."
+description = "Displays item information with CN localization and clearer cooking hints, including readable cook-on effects and next-cook deltas."
 websiteUrl = "https://github.com/cherrycove/ItemInfoDisplay"
 containsNsfwContent = false
 
@@ -42,3 +42,4 @@ communities = [ "peak", ]
 # See categories at:
 # https://thunderstore.io/api/experimental/community/peak/category/
 peak = [ "mods", ]
+

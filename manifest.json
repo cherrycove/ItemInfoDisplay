@@ -1,8 +1,8 @@
 {
   "name": "ItemInfoDisplayForkedCNPlus",
-  "version_number": "1.1.1",
+  "version_number": "1.1.2",
   "website_url": "https://github.com/cherrycove/ItemInfoDisplay",
-  "description": "PEAK item info display with CN localization, updated for newer game versions. I will update promptly after game updates when time allows.",
+  "description": "PEAK item info display with CN localization. This release improves cooking text readability and next-cook effect hints.",
   "dependencies": [
     "BepInEx-BepInExPack_PEAK-5.4.2403"
   ]

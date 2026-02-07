@@ -1,25 +1,25 @@
-# ItemInfoDisplayForkedCNPlus (PEAK)
+﻿# ItemInfoDisplayForkedCNPlus (PEAK)
 
-适配 PEAK 新版本的物品信息显示模组，包含中文本地化。
-Forked from jkqt and chuxiaaaa, updated for current PEAK versions.
-I will update promptly after game updates when time allows.
+Forked from jkqt and chuxiaaaa, maintained for current PEAK versions.
 
 ## Features
-- Status Changes (e.g. Hunger, Poison)
-- Weight
-- Remaining Item Uses
-- Cookability
-- Number of Times Cooked
-- Some Effects & Afflictions
+- Displays consumable status changes (e.g. Hunger, Poison, Curse, Stamina)
+- Displays item weight and remaining uses
+- Displays cookability, cooked count, and next-cook delta hints
+- Displays more readable cooking behavior text in CN localization
+- Shows extra action/affliction hints for cooking-related effects
 
-This mod is mainly for getting the numbers on consumable items.
-It has limited quantification of equipment effects such as ropes (and remedy fungus).
+## Cooking Text Update (v1.1.2)
+- Improved readability for cooking on-trigger effects and action names
+- Improved consistency of `NEXT COOK DELTA` line formatting
+- Better handling for explosion/wreck/no-effect cooking outcomes
+- Added clearer CN texts for thorn add/remove and affliction time changes
 
 ## Config
 - Font Size
 - Text Outline Width
 - Line Spacing
-- Size Delta X (suboptimal workaround to move the text horizontally)
+- Size Delta X (horizontal text offset workaround)
 - Force Update Time
 - Enable Test Mode (cycle items with F1/F2, log with F3)
 
@@ -29,7 +29,5 @@ It has limited quantification of equipment effects such as ropes (and remedy fun
 
 ## Credits
 Thanks to:
-- jkqt for the original ItemInfoDisplay mod. [GitHub](https://github.com/jkqt/ItemInfoDisplay)
-- chuxiaaaa for the CN localization and maintenance. [GitHub](https://github.com/chuxiaaaa/ItemInfoDisplay)
-
-This fork updates the mod for newer PEAK versions and keeps localization improvements.
+- jkqt for the original ItemInfoDisplay mod (https://github.com/jkqt/ItemInfoDisplay)
+- chuxiaaaa for CN localization and maintenance (https://github.com/chuxiaaaa/ItemInfoDisplay)
